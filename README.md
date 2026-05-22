@@ -1,9 +1,84 @@
-# Análisis de Elasticidad Precio — OfficeMax
+# Dynamic Pricing Analyzer
 
-Análisis de elasticidad precio por SKU para la categoría **SUMINISTROS DE OFICINA** de OfficeMax,
-usando modelos de regresión log-log sobre datos de ventas 2024–2026.
+App web genérica de pricing dinámico — sube cualquier tabla de ventas, estima elasticidad,
+simula cambios de precio y recibe recomendaciones automáticas por SKU.
 
-Proyecto desarrollado como parte del **Reto Tec**.
+Construida con **Streamlit** y desplegada en **Railway**.
+
+---
+
+## Demo rápida
+
+1. Sube tu CSV/Excel (o usa `plantilla_input.csv`)
+2. Mapea las columnas a las variables del modelo
+3. Valida la calidad de los datos (semáforo verde/amarillo/rojo)
+4. Estima elasticidad con regresión OLS log-log
+5. Simula escenarios de precio (−10%, +10%, 3x2, 2x1, 2do al 50%)
+6. Obtén recomendaciones por SKU: Subir / Bajar / Mantener / No recomendar
+7. Descarga todos los resultados en CSV
+
+---
+
+## Correr localmente
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+## Desplegar en Railway
+
+1. Conecta este repositorio en [railway.app](https://railway.app)
+2. Railway detecta automáticamente `railway.toml`
+3. El start command ya está configurado con el puerto dinámico `$PORT`
+
+---
+
+## Estructura del repo
+
+```
+├── app.py                  ← App Streamlit (7 pasos)
+├── plantilla_input.csv     ← Datos de ejemplo
+├── requirements.txt
+├── railway.toml            ← Config de despliegue
+├── .streamlit/
+│   └── config.toml        ← Tema y configuración
+│
+└── (análisis OfficeMax — referencia)
+    ├── Elasticidad_OfficeMax.ipynb
+    ├── elasticidad_officmax.py
+    ├── crear_notebook.py
+    └── outputs/
+```
+
+---
+
+## Columnas del archivo de entrada
+
+| Columna | Tipo | Descripción |
+|:---|:---:|:---|
+| `sku` | Obligatoria | Identificador del producto |
+| `unidades` | Obligatoria | Unidades vendidas |
+| `venta_neta` | Obligatoria | Ingreso total de la venta |
+| `fecha` | Obligatoria | Periodo (mes/año) |
+| `precio` | Opcional | Precio unitario (se calcula si no existe) |
+| `costo` | Opcional | Costo unitario (necesario para simular margen) |
+| `departamento` | Opcional | Categoría / departamento |
+| `tienda` | Opcional | Sucursal |
+| `elasticidad` | Opcional | Beta pre-calculada (evita la estimación) |
+
+---
+
+## Tecnologías
+
+- **Streamlit** — interfaz web
+- **statsmodels** — regresión OLS log-log
+- **Plotly** — gráficas interactivas
+- **pandas / numpy** — procesamiento de datos
+
+---
+
+*Reto Tec · 2026*
 
 ---
 

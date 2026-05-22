@@ -1,0 +1,23 @@
+# Datos confidenciales
+datos_officmax/
+*.csv
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# Sistema
+.DS_Store
+desktop.ini
+Thumbs.db

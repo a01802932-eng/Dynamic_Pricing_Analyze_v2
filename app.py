@@ -1075,59 +1075,107 @@ with tab3:
 
     if sel_sku_pred != "— Ver resumen general de todos los productos —":
         # ── MODO PRODUCTO ESPECÍFICO ──────────────────────────────────────────
-        # Extraer nombre real quitando el emoji del inicio
-        real_nm  = sel_sku_pred[2:].strip()
-        sku_row  = df_m1a[df_m1a["prod_nm"] == real_nm].iloc[0]
-        sku_sim  = df_sim[df_sim["prod_nm"] == real_nm]
-        sku_cal  = df_cal[df_cal["prod_nm"] == real_nm] if len(df_cal) > 0 else pd.DataFrame()
+        real_nm = sel_sku_pred[2:].strip()
+        sku_row = df_m1a[df_m1a["prod_nm"] == real_nm].iloc[0]
+        sku_sim = df_sim[df_sim["prod_nm"] == real_nm]
+        sku_cal = df_cal[df_cal["prod_nm"] == real_nm] if len(df_cal) > 0 else pd.DataFrame()
+        rec     = sku_row["recomendacion"]
+        rec_c   = REC_COLORS.get(rec, OM_LGRAY)
+        beta_v  = sku_row["beta"]
+        r2_v    = sku_row["r2"]
+        pval_v  = sku_row["pval"]
+        n_v     = sku_row["n_meses"]
 
-        narr  = generate_sku_narrative(sku_row, sku_sim, sku_cal)
-        rec_c = REC_COLORS.get(sku_row["recomendacion"], OM_LGRAY)
-        if narr:
+        # ── Tarjeta de recomendación ──────────────────────────────────────────
+        col_badge, col_meta = st.columns([1, 2])
+        with col_badge:
             st.markdown(
-                f'<div class="narrative-box" style="border-left-color:{rec_c};">'
-                f'{narr.replace(chr(10),"<br>").replace("**","<strong>").replace("</strong><strong>","")}'
-                f'</div>', unsafe_allow_html=True)
+                f'<div style="background:{rec_c};color:white;border-radius:16px;padding:24px;'
+                f'text-align:center;font-size:20px;font-weight:900;">'
+                f'{rec.upper()}</div>',
+                unsafe_allow_html=True)
+        with col_meta:
+            st.markdown(
+                f'<div style="background:white;border-radius:12px;padding:16px 20px;'
+                f'border-left:4px solid {rec_c};font-size:13px;line-height:2;">'
+                f'<b>Elasticidad (β):</b> {beta_v:.4f} &nbsp;|&nbsp; '
+                f'<b>R²:</b> {r2_v:.4f} &nbsp;|&nbsp; '
+                f'<b>p-valor:</b> {pval_v:.4f} &nbsp;|&nbsp; '
+                f'<b>Meses de datos:</b> {n_v}</div>',
+                unsafe_allow_html=True)
 
-        # Gráfica de simulación para ese SKU
-        if len(sku_sim) > 0:
-            st.markdown("<br>", unsafe_allow_html=True)
-            colors_sc = ["#1565C0","#90CAF9","#9E9E9E","#EF9A9A","#C62828"]
-            fig = go.Figure()
-            fig.add_trace(go.Bar(x=sku_sim["cambio"], y=sku_sim["delta_ingreso_pct"],
-                                 name="Δ Ingreso", marker_color=colors_sc,
-                                 text=[f"{v:+.1f}%" for v in sku_sim["delta_ingreso_pct"]],
-                                 textposition="outside",
-                                 hovertemplate="<b>%{x}</b><br>Δ Ingreso: %{y:+.1f}%<extra></extra>"))
-            fig.add_trace(go.Bar(x=sku_sim["cambio"], y=sku_sim["delta_margen_pct"],
-                                 name="Δ Margen", marker_color=colors_sc, opacity=0.5,
-                                 text=[f"{v:+.1f}%" for v in sku_sim["delta_margen_pct"]],
-                                 textposition="outside",
-                                 hovertemplate="<b>%{x}</b><br>Δ Margen: %{y:+.1f}%<extra></extra>"))
-            fig.add_hline(y=0, line_color="black", line_width=0.8)
-            fig.update_layout(title="Simulación de escenarios de precio",
-                              barmode="group", plot_bgcolor="white", paper_bgcolor="white",
-                              height=340, margin=dict(t=50,b=20,l=20,r=20),
-                              xaxis_title="Escenario", yaxis_title="Cambio (%)",
-                              legend=dict(orientation="h", y=1.1))
-            st.plotly_chart(fig, use_container_width=True)
+        st.markdown("---")
 
-        # Calendario mensual específico
-        if len(sku_cal) > 0:
-            section("📅 Calendario de acciones — este producto")
-            accion_colors = {"SUBIR":OM_BLUE,"PROMOVER":OM_GREEN,"MANTENER":OM_AMBER}
-            fig = px.bar(sku_cal.sort_values("mes_cal"), x="mes_nombre", y="u_idx",
-                         color="accion", title="Demanda relativa por mes (1 = promedio)",
-                         labels={"mes_nombre":"Mes","u_idx":"Índice de demanda","accion":"Acción"},
-                         color_discrete_map=accion_colors,
-                         category_orders={"mes_nombre":MONTH_ORDER,
-                                          "accion":["SUBIR","PROMOVER","MANTENER"]})
+        # ── Narrativa principal (usa st.markdown nativo — maneja ** correctamente) ──
+        narr = generate_sku_narrative(sku_row, sku_sim, sku_cal)
+        if narr:
+            with st.container():
+                st.markdown(narr)
+
+        st.markdown("---")
+
+        # ── Simulación de precios ─────────────────────────────────────────────
+        if len(sku_sim) > 0 and rec != "No recomendable":
+            section("📊 Predicción — ¿cuánto gano si cambio el precio?")
+            left, right = st.columns([1, 2])
+
+            base = sku_sim[sku_sim["cambio"] == "Base 0%"]
+            if len(base) > 0:
+                br = base.iloc[0]
+                with left:
+                    st.markdown(
+                        f'<div style="background:#F8F9FA;border-radius:10px;padding:16px;font-size:13px;line-height:2.2;">'
+                        f'<b>Precio actual:</b> ${br["precio_nuevo"]:,.2f}<br>'
+                        f'<b>Unidades/mes (est.):</b> {br["unidades_est"]:,.1f}<br>'
+                        f'<b>Ingreso mensual:</b> ${br["ingreso_est"]:,.0f}<br>'
+                        f'<b>Margen mensual:</b> ${br["margen_est"]:,.0f}'
+                        f'</div>', unsafe_allow_html=True)
+
+            with right:
+                colors_sc = ["#1565C0","#90CAF9","#9E9E9E","#EF9A9A","#C62828"]
+                fig = go.Figure()
+                fig.add_trace(go.Bar(
+                    x=sku_sim["cambio"], y=sku_sim["delta_ingreso_pct"],
+                    name="Cambio en Ingreso", marker_color=colors_sc,
+                    text=[f"{v:+.1f}%" for v in sku_sim["delta_ingreso_pct"]],
+                    textposition="outside",
+                    hovertemplate="<b>%{x}</b><br>Ingreso: %{y:+.1f}%<extra></extra>"))
+                fig.add_trace(go.Bar(
+                    x=sku_sim["cambio"], y=sku_sim["delta_margen_pct"],
+                    name="Cambio en Margen", marker_color=colors_sc, opacity=0.5,
+                    text=[f"{v:+.1f}%" for v in sku_sim["delta_margen_pct"]],
+                    textposition="outside",
+                    hovertemplate="<b>%{x}</b><br>Margen: %{y:+.1f}%<extra></extra>"))
+                fig.add_hline(y=0, line_color="black", line_width=0.8)
+                fig.update_layout(barmode="group", plot_bgcolor="white", paper_bgcolor="white",
+                                  height=320, margin=dict(t=30,b=20,l=20,r=20),
+                                  xaxis_title="Escenario de precio", yaxis_title="Cambio (%)",
+                                  legend=dict(orientation="h", y=1.12))
+                st.plotly_chart(fig, use_container_width=True)
+
+        # ── Calendario mensual ────────────────────────────────────────────────
+        if len(sku_cal) > 0 and rec != "No recomendable":
+            section("📅 ¿En qué meses actuar? — basado en historial de demanda")
+            st.caption("La barra muestra la demanda relativa de cada mes. "
+                       "Meses con demanda alta (>1) son mejores para subir precio si el producto es inelástico, "
+                       "o para promover si es elástico.")
+            accion_colors = {"SUBIR": OM_BLUE, "PROMOVER": OM_GREEN, "MANTENER": OM_AMBER}
+            fig = px.bar(
+                sku_cal.sort_values("mes_cal"), x="mes_nombre", y="u_idx",
+                color="accion",
+                labels={"mes_nombre": "Mes", "u_idx": "Demanda relativa al promedio", "accion": "Acción"},
+                color_discrete_map=accion_colors,
+                category_orders={"mes_nombre": MONTH_ORDER, "accion": ["SUBIR","PROMOVER","MANTENER"]},
+                text="accion")
             fig.add_hline(y=1, line_dash="dash", line_color="gray", opacity=0.5,
-                          annotation_text="Demanda promedio")
-            fig.update_traces(hovertemplate="<b>%{x}</b><br>Índice: %{y:.2f}<br>Acción: %{fullData.name}<extra></extra>")
-            st.plotly_chart(_layout(fig, h=300), use_container_width=True)
+                          annotation_text="Promedio anual")
+            fig.update_traces(
+                textposition="inside",
+                hovertemplate="<b>%{x}</b><br>Demanda relativa: %{y:.2f}x<br>Acción: %{fullData.name}<extra></extra>")
+            fig.update_layout(showlegend=True, legend_title="Acción recomendada")
+            st.plotly_chart(_layout(fig, h=320), use_container_width=True)
 
-        st.stop()  # No mostrar el resumen general si se seleccionó un producto
+        st.stop()
 
     # ── MODO GENERAL ──────────────────────────────────────────────────────────
     section("📝 Resumen ejecutivo — ¿qué hacer?")

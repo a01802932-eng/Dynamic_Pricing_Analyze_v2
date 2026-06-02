@@ -711,13 +711,13 @@ def compute_descriptivo(df_csv: bytes, dept_tuple, year_tuple, marca_tuple):
     stores = (df.groupby(["store_nbr","store_nm"])
               .agg(venta=("venta_con_iva","sum"),margen=("margen","mean"),unidades=("qty","sum"))
               .reset_index().sort_values("venta",ascending=False).head(20))
-    stores["label"] = stores["store_nbr"]+" "+stores["store_nm"].str.strip().str[:12]
+    stores["label"] = stores["store_nbr"].astype(str)+" "+stores["store_nm"].astype(str).str.strip().str[:12]
     stores["margen_pct"] = stores["margen"]*100
     top_sku = (df.groupby(["prod_nbr","prod_nm"])
                .agg(venta=("venta_con_iva","sum"),unidades=("qty","sum"),
                     precio_prom=("precio_tx","mean"),margen=("margen","mean"))
                .reset_index().sort_values("venta",ascending=False).head(15))
-    top_sku["label"] = top_sku["prod_nbr"]+" "+top_sku["prod_nm"].str[:20]
+    top_sku["label"] = top_sku["prod_nbr"].astype(str)+" "+top_sku["prod_nm"].str[:20]
     prem = (df.groupby("es_premium")
             .agg(venta=("venta_con_iva","sum"),unidades=("qty","sum"),
                  precio_prom=("precio_tx","mean"),margen_prom=("margen","mean"))

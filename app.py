@@ -93,7 +93,7 @@ html, body, [class*="css"] { font-family: 'Roboto', Arial, sans-serif !important
 # ══════════════════════════════════════════════════════════════════════════════
 # SESSION STATE
 # ══════════════════════════════════════════════════════════════════════════════
-for _k in ["df_main", "clean_report", "results"]:
+for _k in ["df_main", "clean_report", "results", "df_csv_bytes"]:
     if _k not in st.session_state:
         st.session_state[_k] = None
 
@@ -499,6 +499,9 @@ with st.sidebar:
                 st.session_state["df_main"]      = df_main
                 st.session_state["clean_report"] = report_df
                 st.session_state["results"]      = None
+                # Convertir a CSV bytes UNA SOLA VEZ — evita que el caché de run_models
+                # se rompa por bytes distintos en cada re-render
+                st.session_state["df_csv_bytes"] = df_main.to_csv(index=False).encode("utf-8")
                 st.success("✅ Datos cargados")
                 st.caption(report_df.iloc[-1]["Detalle"])
             except Exception as e:
@@ -586,7 +589,7 @@ with tab1:
     if run_btn:
         with st.spinner("Calculando modelos..."):
             try:
-                csv_bytes = df_main.to_csv(index=False).encode("utf-8")
+                csv_bytes = st.session_state["df_csv_bytes"]
                 res = run_models(df_csv=csv_bytes, min_obs=min_obs, min_cv=min_cv,
                                  min_r2=min_r2, max_beta=max_beta, pval_thresh=pval_thresh,
                                  run_rolling=run_rolling)
@@ -836,9 +839,9 @@ with tab2:
         else:
             marca_sel = []
 
-    # Compute aggregations (cached — no re-corre si solo cambian filtros de Tab 3)
-    df_csv_bytes = df_main.to_csv(index=False).encode("utf-8")
-    agg = compute_descriptivo(df_csv_bytes, tuple(dept_sel), tuple(year_sel), tuple(marca_sel))
+    # Compute aggregations (cached — mismos bytes siempre → nunca re-corre)
+    agg = compute_descriptivo(st.session_state["df_csv_bytes"],
+                              tuple(dept_sel), tuple(year_sel), tuple(marca_sel))
     if agg is None:
         st.warning("No hay datos con los filtros seleccionados.")
         st.stop()

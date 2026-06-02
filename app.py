@@ -680,49 +680,183 @@ with tab1:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# CACHED DESCRIPTIVO AGGREGATIONS  (evita recalcular al mover filtros en Tab 3)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(show_spinner=False)
+def compute_descriptivo(df_csv: bytes, dept_tuple, year_tuple, marca_tuple):
+    df = pd.read_csv(io.BytesIO(df_csv), low_memory=False)
+    df["tran_date"]     = pd.to_datetime(df["tran_date"], errors="coerce")
+    df["mes_str"]       = df["tran_date"].dt.to_period("M").astype(str)
+    df["año"]           = df["tran_date"].dt.year
+    df["mes_calendario"]= df["tran_date"].dt.month
+    df["precio_tx"]     = pd.to_numeric(df["venta_con_iva"], errors="coerce") / pd.to_numeric(df["qty"], errors="coerce")
+    df["margen"]        = pd.to_numeric(df["margen"],        errors="coerce")
+    df["venta_con_iva"] = pd.to_numeric(df["venta_con_iva"], errors="coerce")
+    df["qty"]           = pd.to_numeric(df["qty"],           errors="coerce")
+
+    if dept_tuple:  df = df[df["dept_nm"].isin(dept_tuple)]
+    if year_tuple:  df = df[df["año"].isin(year_tuple)]
+    if marca_tuple: df = df[df["tipo_marca"].isin(marca_tuple)]
+    if len(df) == 0: return None
+
+    ts = (df.groupby("mes_str").agg(venta=("venta_con_iva","sum"),unidades=("qty","sum"))
+          .reset_index().sort_values("mes_str"))
+    dept = (df.groupby("dept_nm").agg(venta=("venta_con_iva","sum"),n_skus=("prod_nbr","nunique"))
+            .reset_index().sort_values("venta",ascending=False))
+    dept["dept_short"] = dept["dept_nm"].str[:28]
+    stores = (df.groupby(["store_nbr","store_nm"])
+              .agg(venta=("venta_con_iva","sum"),margen=("margen","mean"),unidades=("qty","sum"))
+              .reset_index().sort_values("venta",ascending=False).head(20))
+    stores["label"] = stores["store_nbr"]+" "+stores["store_nm"].str.strip().str[:12]
+    stores["margen_pct"] = stores["margen"]*100
+    top_sku = (df.groupby(["prod_nbr","prod_nm"])
+               .agg(venta=("venta_con_iva","sum"),unidades=("qty","sum"),
+                    precio_prom=("precio_tx","mean"),margen=("margen","mean"))
+               .reset_index().sort_values("venta",ascending=False).head(15))
+    top_sku["label"] = top_sku["prod_nbr"]+" "+top_sku["prod_nm"].str[:20]
+    prem = (df.groupby("es_premium")
+            .agg(venta=("venta_con_iva","sum"),unidades=("qty","sum"),
+                 precio_prom=("precio_tx","mean"),margen_prom=("margen","mean"))
+            .reset_index())
+    prem["tipo"] = prem["es_premium"].map({0:"No Premium",1:"Premium"})
+    prem["margen_pct"] = prem["margen_prom"]*100
+    marca = (df.groupby("tipo_marca").agg(venta=("venta_con_iva","sum"),margen_prom=("margen","mean"))
+             .reset_index()) if "tipo_marca" in df.columns else pd.DataFrame()
+    if len(marca)>0: marca["margen_pct"] = marca["margen_prom"]*100
+    seas = (df.groupby("mes_calendario")
+            .agg(venta_prom=("venta_con_iva","mean"),unidades_prom=("qty","mean"))
+            .reset_index().sort_values("mes_calendario"))
+    seas["mes_nombre"] = seas["mes_calendario"].map(MONTH_NAMES)
+
+    kpis = {"venta":df["venta_con_iva"].sum(),"unidades":df["qty"].sum(),
+            "n_skus":df["prod_nbr"].nunique(),"n_stores":df["store_nbr"].nunique(),
+            "margen":df["margen"].mean()*100,
+            "p95_p":df["precio_tx"].quantile(0.95),"p95_q":df["qty"].quantile(0.95)}
+
+    dist_p  = df[df["precio_tx"]<=kpis["p95_p"]][["precio_tx"]].copy()
+    dist_m  = df[df["margen"].between(-0.5,1.0)][["margen"]].copy()
+    dist_q  = df[df["qty"]<=kpis["p95_q"]][["qty"]].copy()
+
+    return {"ts":ts,"dept":dept,"stores":stores,"top_sku":top_sku,"prem":prem,
+            "marca":marca,"seas":seas,"kpis":kpis,
+            "dist_p":dist_p,"dist_m":dist_m,"dist_q":dist_q}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SKU-SPECIFIC NARRATIVE
+# ══════════════════════════════════════════════════════════════════════════════
+
+def generate_sku_narrative(sku_row, sku_sim, sku_cal):
+    """Genera un análisis completo en lenguaje natural para un SKU específico."""
+    nm    = sku_row["prod_nm"]
+    beta  = sku_row["beta"]
+    r2    = sku_row["r2"]
+    pval  = sku_row["pval"]
+    n_m   = sku_row["n_meses"]
+    rec   = sku_row["recomendacion"]
+    color = REC_COLORS.get(rec, OM_LGRAY)
+
+    # Interpretación de la elasticidad en palabras
+    if rec == "Subir precio":
+        elast_txt = (f"es **inelástico** (β={beta:.2f}): cuando sube el precio, "
+                     f"los clientes casi no cambian su comportamiento de compra.")
+        accion_txt = ("📈 **Sube el precio.** Puedes incrementarlo sin perder ventas significativas. "
+                      "Cada 10% de aumento en precio genera más ingreso neto.")
+    elif rec == "Mantener precio":
+        elast_txt = (f"tiene elasticidad **unitaria** (β={beta:.2f}): cambios de precio "
+                     f"afectan las ventas casi en la misma proporción.")
+        accion_txt = ("⚖️ **Mantén el precio actual.** Subir o bajar el precio genera cambios "
+                      "proporcionales en ventas — el ingreso total se mantiene similar.")
+    elif rec == "Bajar / Promover":
+        elast_txt = (f"es **elástico** (β={beta:.2f}): cuando baja el precio, "
+                     f"las ventas aumentan más que proporcionalmente.")
+        accion_txt = ("🏷️ **Activa promociones o reduce el precio.** Bajar 10% el precio puede "
+                      "generar mucho más volumen de ventas y compensar el menor margen unitario.")
+    else:
+        return None
+
+    # Simulación del mejor escenario
+    sim_note = ""
+    if len(sku_sim) > 0:
+        base = sku_sim[sku_sim["cambio"]=="Base 0%"]
+        if rec == "Subir precio":
+            best = sku_sim[sku_sim["cambio"]=="+10%"]
+        elif rec == "Bajar / Promover":
+            best = sku_sim[sku_sim["cambio"]=="-10%"]
+        else:
+            best = base
+        if len(best)>0 and len(base)>0:
+            br = base.iloc[0]; be = best.iloc[0]
+            chg_lbl = "+10%" if rec=="Subir precio" else ("-10%" if rec=="Bajar / Promover" else "sin cambio")
+            sim_note = (f"\n\n💰 **Simulación ({chg_lbl} en precio):** "
+                        f"precio ${be['precio_nuevo']:,.2f} → "
+                        f"unidades estimadas {be['unidades_est']:,.0f} → "
+                        f"ingreso {be['delta_ingreso_pct']:+.1f}% · margen {be['delta_margen_pct']:+.1f}%")
+
+    # Calendario mensual
+    cal_note = ""
+    if len(sku_cal) > 0:
+        meses_subir  = sku_cal[sku_cal["accion"]=="SUBIR"]["mes_nombre"].tolist()
+        meses_prom   = sku_cal[sku_cal["accion"]=="PROMOVER"]["mes_nombre"].tolist()
+        meses_mant   = sku_cal[sku_cal["accion"]=="MANTENER"]["mes_nombre"].tolist()
+        cal_note = "\n\n📅 **¿Cuándo actuar?**\n"
+        if meses_subir:
+            cal_note += f"- 🔵 **Subir precio:** {', '.join(meses_subir)} (meses de alta demanda histórica)\n"
+        if meses_prom:
+            cal_note += f"- 🟢 **Promover / descuento:** {', '.join(meses_prom)} (demanda baja — las promos tienen más impacto)\n"
+        if meses_mant:
+            cal_note += f"- 🟡 **Mantener:** {', '.join(meses_mant)}\n"
+
+    confianza = "alta" if (r2>=0.3 and pval<0.05) else ("media" if (r2>=0.1 and pval<0.10) else "baja")
+    conf_nota = (f"\n\n🔬 **Confianza del modelo:** {confianza} "
+                 f"(R²={r2:.3f}, p={pval:.3f}, {n_m} meses de datos)")
+
+    return f"### {nm[:60]}\n\nEste producto {elast_txt}\n\n{accion_txt}{sim_note}{cal_note}{conf_nota}"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — DASHBOARD DESCRIPTIVO
 # ══════════════════════════════════════════════════════════════════════════════
 with tab2:
-    df = df_main.copy()
-
     # Filtros globales al inicio
     section("🔍 Filtros")
     ff1, ff2, ff3 = st.columns(3)
+    raw_df = df_main  # reference only for filter options
     with ff1:
-        all_depts = sorted(df["dept_nm"].dropna().unique().tolist())
+        all_depts = sorted(raw_df["dept_nm"].dropna().unique().tolist())
         dept_sel = st.multiselect("Departamento", all_depts, key="desc_dept")
     with ff2:
-        all_years = sorted(df["año"].dropna().unique().tolist())
+        all_years = sorted(raw_df["año"].dropna().unique().tolist())
         year_sel = st.multiselect("Año", all_years, key="desc_year")
     with ff3:
-        if "tipo_marca" in df.columns:
-            all_marcas = sorted(df["tipo_marca"].dropna().unique().tolist())
+        if "tipo_marca" in raw_df.columns:
+            all_marcas = sorted(raw_df["tipo_marca"].dropna().unique().tolist())
             marca_sel = st.multiselect("Tipo de marca", all_marcas, key="desc_marca")
         else:
             marca_sel = []
 
-    if dept_sel:  df = df[df["dept_nm"].isin(dept_sel)]
-    if year_sel:  df = df[df["año"].isin(year_sel)]
-    if marca_sel: df = df[df["tipo_marca"].isin(marca_sel)]
-
-    if len(df) == 0:
+    # Compute aggregations (cached — no re-corre si solo cambian filtros de Tab 3)
+    df_csv_bytes = df_main.to_csv(index=False).encode("utf-8")
+    agg = compute_descriptivo(df_csv_bytes, tuple(dept_sel), tuple(year_sel), tuple(marca_sel))
+    if agg is None:
         st.warning("No hay datos con los filtros seleccionados.")
         st.stop()
+    kpis = agg["kpis"]
 
     # KPIs
     section("📊 Indicadores clave")
     kc = st.columns(5)
-    kpi(kc[0],"Venta total",      f"${df['venta_con_iva'].sum()/1e6:.1f}M", OM_RED)
-    kpi(kc[1],"Unidades vendidas",f"{df['qty'].sum()/1e3:.0f}K",            OM_BLUE)
-    kpi(kc[2],"SKUs únicos",      f"{df['prod_nbr'].nunique():,}",           OM_GREEN)
-    kpi(kc[3],"Tiendas",          f"{df['store_nbr'].nunique()}",            OM_AMBER)
-    kpi(kc[4],"Margen promedio",  f"{df['margen'].mean()*100:.1f}%",         "#7B1FA2")
+    kpi(kc[0],"Venta total",      f"${kpis['venta']/1e6:.1f}M",   OM_RED)
+    kpi(kc[1],"Unidades vendidas",f"{kpis['unidades']/1e3:.0f}K", OM_BLUE)
+    kpi(kc[2],"SKUs únicos",      f"{kpis['n_skus']:,}",           OM_GREEN)
+    kpi(kc[3],"Tiendas",          f"{kpis['n_stores']}",           OM_AMBER)
+    kpi(kc[4],"Margen promedio",  f"{kpis['margen']:.1f}%",        "#7B1FA2")
     st.markdown("<br>", unsafe_allow_html=True)
 
     # Time series
     section("📅 Evolución mensual de ventas")
-    ts = (df.groupby("mes_str").agg(venta=("venta_con_iva","sum"),unidades=("qty","sum"))
-          .reset_index().sort_values("mes_str"))
+    ts = agg["ts"]
     tc1,tc2 = st.columns(2)
     with tc1:
         fig = px.area(ts, x="mes_str", y="venta", title="Venta mensual total ($)",
@@ -737,42 +871,32 @@ with tab2:
 
     # Department
     section("🏷️ Ventas por departamento")
-    dept = (df.groupby("dept_nm").agg(venta=("venta_con_iva","sum"),n_skus=("prod_nbr","nunique"))
-            .reset_index().sort_values("venta",ascending=False))
-    dept["dept_short"] = dept["dept_nm"].str[:28]
+    dept = agg["dept"]
     dc1,dc2 = st.columns([3,2])
     with dc1:
         fig = px.bar(dept, x="venta", y="dept_short", orientation="h",
                      title="Venta total por departamento",
                      labels={"venta":"Ventas ($)","dept_short":"Departamento"},
                      color="venta", color_continuous_scale=[[0,"#FFCDD2"],[1,OM_RED]])
-        fig.update_layout(coloraxis_showscale=False, yaxis=dict(autorange="reversed"),
-                          showlegend=False)
+        fig.update_layout(coloraxis_showscale=False, yaxis=dict(autorange="reversed"), showlegend=False)
         fig.update_traces(hovertemplate="<b>%{y}</b><br>Ventas: $%{x:,.0f}<extra></extra>")
         st.plotly_chart(_layout(fig, h=380), use_container_width=True)
     with dc2:
-        top8 = dept.head(8)
-        fig = px.pie(top8, values="venta", names="dept_short", title="Participación (top 8)",
+        fig = px.pie(dept.head(8), values="venta", names="dept_short", title="Participación (top 8)",
                      color_discrete_sequence=px.colors.qualitative.Set2)
         fig.update_traces(textposition="inside", textinfo="percent", textfont_size=11,
                           hovertemplate="<b>%{label}</b><br>%{percent}<extra></extra>")
-        fig.update_layout(showlegend=True, height=380, paper_bgcolor="white",
-                          margin=dict(t=45,b=20,l=20,r=20))
+        fig.update_layout(showlegend=True, height=380, paper_bgcolor="white", margin=dict(t=45,b=20,l=20,r=20))
         st.plotly_chart(fig, use_container_width=True)
 
     # Store performance
     section("🏪 Desempeño por tienda (Top 20)")
-    stores = (df.groupby(["store_nbr","store_nm"])
-              .agg(venta=("venta_con_iva","sum"),margen=("margen","mean"),unidades=("qty","sum"))
-              .reset_index().sort_values("venta",ascending=False).head(20))
-    stores["label"] = stores["store_nbr"]+" "+stores["store_nm"].str.strip().str[:12]
-    stores["margen_pct"] = stores["margen"]*100
+    stores = agg["stores"]
     sc1,sc2 = st.columns(2)
     with sc1:
         fig = go.Figure(go.Bar(
             x=stores["label"], y=stores["venta"],
-            marker=dict(color=stores["margen_pct"],
-                        colorscale=[[0,OM_RED],[0.5,OM_AMBER],[1,OM_GREEN]],
+            marker=dict(color=stores["margen_pct"], colorscale=[[0,OM_RED],[0.5,OM_AMBER],[1,OM_GREEN]],
                         colorbar=dict(title="Margen %")),
             hovertemplate="<b>%{x}</b><br>Ventas: $%{y:,.0f}<br>Margen: %{marker.color:.1f}%<extra></extra>"))
         fig.update_layout(title="Top 20 tiendas por ventas (color = margen)",
@@ -781,11 +905,10 @@ with tab2:
                           height=380, margin=dict(t=45,b=80,l=20,r=20))
         st.plotly_chart(fig, use_container_width=True)
     with sc2:
-        fig = px.scatter(stores, x="venta", y="margen_pct", size="unidades",
-                         text="store_nbr", title="Ventas vs Margen",
+        fig = px.scatter(stores, x="venta", y="margen_pct", size="unidades", text="store_nbr",
+                         title="Ventas vs Margen",
                          labels={"venta":"Ventas ($)","margen_pct":"Margen (%)","store_nbr":"Tienda"},
-                         color="margen_pct",
-                         color_continuous_scale=[[0,OM_RED],[0.5,OM_AMBER],[1,OM_GREEN]])
+                         color="margen_pct", color_continuous_scale=[[0,OM_RED],[0.5,OM_AMBER],[1,OM_GREEN]])
         fig.update_traces(textposition="top center", textfont_size=8,
                           hovertemplate="<b>%{text}</b><br>Ventas: $%{x:,.0f}<br>Margen: %{y:.1f}%<extra></extra>")
         fig.update_layout(coloraxis_showscale=False)
@@ -793,24 +916,18 @@ with tab2:
 
     # Top SKUs
     section("🏆 Top 15 productos")
-    top_sku = (df.groupby(["prod_nbr","prod_nm"])
-               .agg(venta=("venta_con_iva","sum"),unidades=("qty","sum"),
-                    precio_prom=("precio_tx","mean"),margen=("margen","mean"))
-               .reset_index().sort_values("venta",ascending=False).head(15))
-    top_sku["label"] = top_sku["prod_nbr"]+" "+top_sku["prod_nm"].str[:20]
+    top_sku = agg["top_sku"]
     sk1,sk2 = st.columns(2)
     with sk1:
         fig = px.bar(top_sku.sort_values("venta"), x="venta", y="label", orientation="h",
-                     title="Por venta total ($)",
-                     labels={"venta":"Ventas ($)","label":""},
+                     title="Por venta total ($)", labels={"venta":"Ventas ($)","label":""},
                      color_discrete_sequence=[OM_RED])
         fig.update_traces(hovertemplate="<b>%{y}</b><br>Ventas: $%{x:,.0f}<extra></extra>")
         fig.update_yaxes(tickfont=dict(size=9))
         st.plotly_chart(_layout(fig,h=440), use_container_width=True)
     with sk2:
         fig = px.bar(top_sku.sort_values("unidades"), x="unidades", y="label", orientation="h",
-                     title="Por unidades vendidas",
-                     labels={"unidades":"Unidades","label":""},
+                     title="Por unidades vendidas", labels={"unidades":"Unidades","label":""},
                      color_discrete_sequence=[OM_BLUE])
         fig.update_traces(hovertemplate="<b>%{y}</b><br>Unidades: %{x:,.0f}<extra></extra>")
         fig.update_yaxes(tickfont=dict(size=9))
@@ -818,38 +935,26 @@ with tab2:
 
     # Distributions
     section("📊 Distribuciones de precio, margen y unidades")
-    p95_p = df["precio_tx"].quantile(0.95); p95_q = df["qty"].quantile(0.95)
     dc1,dc2,dc3 = st.columns(3)
     with dc1:
-        fig = px.histogram(df[df["precio_tx"]<=p95_p], x="precio_tx", nbins=50,
-                           title="Distribución de precios",
-                           labels={"precio_tx":"Precio unitario ($)"},
-                           color_discrete_sequence=[OM_RED])
+        fig = px.histogram(agg["dist_p"], x="precio_tx", nbins=50, title="Distribución de precios",
+                           labels={"precio_tx":"Precio unitario ($)"}, color_discrete_sequence=[OM_RED])
         fig.update_layout(showlegend=False, bargap=0.05)
         st.plotly_chart(_layout(fig,h=280), use_container_width=True)
     with dc2:
-        fig = px.histogram(df[df["margen"].between(-0.5,1.0)], x="margen", nbins=40,
-                           title="Distribución de márgenes",
-                           labels={"margen":"Margen (ratio)"},
-                           color_discrete_sequence=[OM_GREEN])
+        fig = px.histogram(agg["dist_m"], x="margen", nbins=40, title="Distribución de márgenes",
+                           labels={"margen":"Margen (ratio)"}, color_discrete_sequence=[OM_GREEN])
         fig.update_layout(showlegend=False, bargap=0.05)
         st.plotly_chart(_layout(fig,h=280), use_container_width=True)
     with dc3:
-        fig = px.histogram(df[df["qty"]<=p95_q], x="qty", nbins=40,
-                           title="Unidades por transacción",
-                           labels={"qty":"Unidades"},
-                           color_discrete_sequence=[OM_AMBER])
+        fig = px.histogram(agg["dist_q"], x="qty", nbins=40, title="Unidades por transacción",
+                           labels={"qty":"Unidades"}, color_discrete_sequence=[OM_AMBER])
         fig.update_layout(showlegend=False, bargap=0.05)
         st.plotly_chart(_layout(fig,h=280), use_container_width=True)
 
     # Premium
     section("⭐ Premium vs No Premium")
-    prem = (df.groupby("es_premium")
-            .agg(venta=("venta_con_iva","sum"),unidades=("qty","sum"),
-                 precio_prom=("precio_tx","mean"),margen_prom=("margen","mean"))
-            .reset_index())
-    prem["tipo"] = prem["es_premium"].map({0:"No Premium",1:"Premium"})
-    prem["margen_pct"] = prem["margen_prom"]*100
+    prem = agg["prem"]
     pm1,pm2,pm3 = st.columns(3)
     for col_w, metric, lbl, pfx in [
         (pm1,"venta","Venta total ($)","$"),
@@ -860,34 +965,27 @@ with tab2:
         fig = px.bar(prem, x="tipo", y=metric, title=lbl,
                      color="tipo", color_discrete_map={"No Premium":OM_BLUE,"Premium":OM_RED})
         suf = "%" if pfx=="" else ""
-        fig.update_traces(
-            text=[f"{pfx}{v:,.1f}{suf}" for v in vals],
-            textposition="outside",
-            hovertemplate="<b>%{x}</b><br>"+lbl+": %{y:,.2f}<extra></extra>")
+        fig.update_traces(text=[f"{pfx}{v:,.1f}{suf}" for v in vals], textposition="outside",
+                          hovertemplate="<b>%{x}</b><br>"+lbl+": %{y:,.2f}<extra></extra>")
         fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="")
         col_w.plotly_chart(_layout(fig,h=260), use_container_width=True)
 
     # Brand type
-    if "tipo_marca" in df.columns:
+    marca = agg["marca"]
+    if len(marca) > 0:
         section("🏷️ Marca Propia vs Marca Externa")
-        marca = (df.groupby("tipo_marca")
-                 .agg(venta=("venta_con_iva","sum"),margen_prom=("margen","mean"))
-                 .reset_index())
-        marca["margen_pct"] = marca["margen_prom"]*100
         mb1,mb2 = st.columns(2)
         with mb1:
             fig = px.bar(marca, x="tipo_marca", y="venta", title="Venta por tipo de marca",
                          color="tipo_marca", color_discrete_sequence=[OM_RED,OM_BLUE,OM_GREEN])
-            fig.update_traces(text=[f"${v/1e3:,.0f}K" for v in marca["venta"]],
-                              textposition="outside",
+            fig.update_traces(text=[f"${v/1e3:,.0f}K" for v in marca["venta"]], textposition="outside",
                               hovertemplate="<b>%{x}</b><br>Ventas: $%{y:,.0f}<extra></extra>")
             fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="Ventas ($)")
             st.plotly_chart(_layout(fig,h=280), use_container_width=True)
         with mb2:
             fig = px.bar(marca, x="tipo_marca", y="margen_pct", title="Margen por tipo de marca",
                          color="tipo_marca", color_discrete_sequence=[OM_GREEN,OM_AMBER,OM_BLUE])
-            fig.update_traces(text=[f"{v:.1f}%" for v in marca["margen_pct"]],
-                              textposition="outside",
+            fig.update_traces(text=[f"{v:.1f}%" for v in marca["margen_pct"]], textposition="outside",
                               hovertemplate="<b>%{x}</b><br>Margen: %{y:.1f}%<extra></extra>")
             fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="Margen (%)")
             st.plotly_chart(_layout(fig,h=280), use_container_width=True)
@@ -935,7 +1033,69 @@ with tab3:
 
     rec_counts = df_m1a["recomendacion"].value_counts()
 
-    # ── Narrativa ejecutiva ───────────────────────────────────────────────────
+    # ── Selector: general o por producto ─────────────────────────────────────
+    valid_for_sel = df_m1a[df_m1a["recomendacion"] != "No recomendable"]
+    sku_options   = ["— Ver resumen general —"] + sorted(valid_for_sel["prod_nm"].tolist())
+    sel_sku_pred  = st.selectbox("🔎 Analizar producto específico o ver resumen general:",
+                                 sku_options, key="pred_sku_sel")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    if sel_sku_pred != "— Ver resumen general —":
+        # ── MODO PRODUCTO ESPECÍFICO ──────────────────────────────────────────
+        sku_row  = df_m1a[df_m1a["prod_nm"] == sel_sku_pred].iloc[0]
+        sku_sim  = df_sim[df_sim["prod_nm"] == sel_sku_pred]
+        sku_cal  = df_cal[df_cal["prod_nm"] == sel_sku_pred] if len(df_cal) > 0 else pd.DataFrame()
+
+        narr = generate_sku_narrative(sku_row, sku_sim, sku_cal)
+        if narr:
+            rec_c = REC_COLORS.get(sku_row["recomendacion"], OM_LGRAY)
+            st.markdown(
+                f'<div class="narrative-box" style="border-left-color:{rec_c};">'
+                f'{narr.replace(chr(10),"<br>").replace("**","<strong>").replace("</strong><strong>","")}'
+                f'</div>', unsafe_allow_html=True)
+
+        # Gráfica de simulación para ese SKU
+        if len(sku_sim) > 0:
+            st.markdown("<br>", unsafe_allow_html=True)
+            colors_sc = ["#1565C0","#90CAF9","#9E9E9E","#EF9A9A","#C62828"]
+            fig = go.Figure()
+            fig.add_trace(go.Bar(x=sku_sim["cambio"], y=sku_sim["delta_ingreso_pct"],
+                                 name="Δ Ingreso", marker_color=colors_sc,
+                                 text=[f"{v:+.1f}%" for v in sku_sim["delta_ingreso_pct"]],
+                                 textposition="outside",
+                                 hovertemplate="<b>%{x}</b><br>Δ Ingreso: %{y:+.1f}%<extra></extra>"))
+            fig.add_trace(go.Bar(x=sku_sim["cambio"], y=sku_sim["delta_margen_pct"],
+                                 name="Δ Margen", marker_color=colors_sc, opacity=0.5,
+                                 text=[f"{v:+.1f}%" for v in sku_sim["delta_margen_pct"]],
+                                 textposition="outside",
+                                 hovertemplate="<b>%{x}</b><br>Δ Margen: %{y:+.1f}%<extra></extra>"))
+            fig.add_hline(y=0, line_color="black", line_width=0.8)
+            fig.update_layout(title="Simulación de escenarios de precio",
+                              barmode="group", plot_bgcolor="white", paper_bgcolor="white",
+                              height=340, margin=dict(t=50,b=20,l=20,r=20),
+                              xaxis_title="Escenario", yaxis_title="Cambio (%)",
+                              legend=dict(orientation="h", y=1.1))
+            st.plotly_chart(fig, use_container_width=True)
+
+        # Calendario mensual específico
+        if len(sku_cal) > 0:
+            section("📅 Calendario de acciones — este producto")
+            accion_colors = {"SUBIR":OM_BLUE,"PROMOVER":OM_GREEN,"MANTENER":OM_AMBER}
+            fig = px.bar(sku_cal.sort_values("mes_cal"), x="mes_nombre", y="u_idx",
+                         color="accion", title="Demanda relativa por mes (1 = promedio)",
+                         labels={"mes_nombre":"Mes","u_idx":"Índice de demanda","accion":"Acción"},
+                         color_discrete_map=accion_colors,
+                         category_orders={"mes_nombre":MONTH_ORDER,
+                                          "accion":["SUBIR","PROMOVER","MANTENER"]})
+            fig.add_hline(y=1, line_dash="dash", line_color="gray", opacity=0.5,
+                          annotation_text="Demanda promedio")
+            fig.update_traces(hovertemplate="<b>%{x}</b><br>Índice: %{y:.2f}<br>Acción: %{fullData.name}<extra></extra>")
+            st.plotly_chart(_layout(fig, h=300), use_container_width=True)
+
+        st.stop()  # No mostrar el resumen general si se seleccionó un producto
+
+    # ── MODO GENERAL ──────────────────────────────────────────────────────────
     section("📝 Resumen ejecutivo — ¿qué hacer?")
     narrative = generate_narrative(df_m1a, m2, df_cal)
     st.markdown(f'<div class="narrative-box">{narrative.replace(chr(10), "<br>")}</div>',

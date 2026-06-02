@@ -93,7 +93,7 @@ html, body, [class*="css"] { font-family: 'Roboto', Arial, sans-serif !important
 # ══════════════════════════════════════════════════════════════════════════════
 # SESSION STATE
 # ══════════════════════════════════════════════════════════════════════════════
-for _k in ["df_main", "clean_report", "results", "df_csv_bytes"]:
+for _k in ["df_main", "clean_report", "results", "df_csv_bytes", "loaded_file_name"]:
     if _k not in st.session_state:
         st.session_state[_k] = None
 
@@ -492,20 +492,26 @@ with st.sidebar:
     uploaded = st.file_uploader("Archivo .ZIP", type=["zip"], label_visibility="collapsed")
 
     if uploaded:
-        raw_bytes = uploaded.read()
-        with st.spinner("Leyendo y limpiando..."):
-            try:
-                df_main, report_df = load_and_clean(raw_bytes)
-                st.session_state["df_main"]      = df_main
-                st.session_state["clean_report"] = report_df
-                st.session_state["results"]      = None
-                # Convertir a CSV bytes UNA SOLA VEZ — evita que el caché de run_models
-                # se rompa por bytes distintos en cada re-render
-                st.session_state["df_csv_bytes"] = df_main.to_csv(index=False).encode("utf-8")
-                st.success("✅ Datos cargados")
-                st.caption(report_df.iloc[-1]["Detalle"])
-            except Exception as e:
-                st.error(f"❌ {e}")
+        # Solo procesar si es un archivo NUEVO — el file_uploader retiene el archivo
+        # en cada re-render, lo que ejecutaría este bloque (y borraría results) en cada clic.
+        is_new_file = st.session_state.get("loaded_file_name") != uploaded.name
+        if is_new_file:
+            raw_bytes = uploaded.read()
+            with st.spinner("Leyendo y limpiando..."):
+                try:
+                    df_main, report_df = load_and_clean(raw_bytes)
+                    st.session_state["df_main"]          = df_main
+                    st.session_state["clean_report"]     = report_df
+                    st.session_state["results"]          = None
+                    st.session_state["df_csv_bytes"]     = df_main.to_csv(index=False).encode("utf-8")
+                    st.session_state["loaded_file_name"] = uploaded.name
+                    st.success("✅ Datos cargados")
+                    st.caption(report_df.iloc[-1]["Detalle"])
+                except Exception as e:
+                    st.error(f"❌ {e}")
+        else:
+            st.success("✅ Datos cargados")
+            st.caption(st.session_state["clean_report"].iloc[-1]["Detalle"] if st.session_state["clean_report"] is not None else "")
 
     st.markdown("<hr style='border-color:#333; margin:16px 0;'>", unsafe_allow_html=True)
     st.caption("**Flujo recomendado:**\n\n1. Sube el ZIP\n2. **Calculadora** → ejecuta el modelo\n3. **Descriptivo** → explora los datos\n4. **Predictivo** → ve qué hacer")

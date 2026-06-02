@@ -783,7 +783,25 @@ def generate_sku_narrative(sku_row, sku_sim, sku_cal):
         accion_txt = ("🏷️ **Activa promociones o reduce el precio.** Bajar 10% el precio puede "
                       "generar mucho más volumen de ventas y compensar el menor margen unitario.")
     else:
-        return None
+        # No recomendable — explica el motivo exacto
+        razones = []
+        if sku_row["pval"] >= 0.10:
+            razones.append(f"el p-valor es {pval:.3f} (> 0.10): la relación precio-ventas **no es estadísticamente confiable** con estos datos")
+        if sku_row["n_meses"] < 6:
+            razones.append(f"solo hay **{n_m} meses de datos** (mínimo recomendado: 6)")
+        if beta > 0:
+            razones.append(f"la beta es **positiva ({beta:.2f})**, lo que implicaría que subir precio aumenta ventas — económicamente inusual, probablemente ruido")
+        if abs(beta) > 3:
+            razones.append(f"la beta es **extrema (β={beta:.2f})**: una elasticidad mayor a 3 en valor absoluto casi nunca es real en retail")
+        if not razones:
+            razones.append("los datos de este SKU no permiten estimar elasticidad de forma confiable")
+
+        motivo = "; ".join(razones)
+        return (f"### {nm[:60]}\n\n"
+                f"⚠️ **Este producto no tiene recomendación de precio** porque {motivo}.\n\n"
+                f"Esto no significa que el producto sea irrelevante — solo que con los datos disponibles "
+                f"no podemos estimar con confianza cómo reaccionan las ventas ante un cambio de precio.\n\n"
+                f"🔬 Datos del modelo: β={beta:.4f} · R²={r2:.4f} · p={pval:.4f} · {n_m} meses")
 
     # Simulación del mejor escenario
     sim_note = ""
@@ -1040,22 +1058,32 @@ with tab3:
     rec_counts = df_m1a["recomendacion"].value_counts()
 
     # ── Selector: general o por producto ─────────────────────────────────────
-    valid_for_sel = df_m1a[df_m1a["recomendacion"] != "No recomendable"]
-    sku_options   = ["— Ver resumen general —"] + sorted(valid_for_sel["prod_nm"].tolist())
-    sel_sku_pred  = st.selectbox("🔎 Analizar producto específico o ver resumen general:",
-                                 sku_options, key="pred_sku_sel")
+    section("🔍 Análisis por producto")
+    st.caption("Selecciona un producto para ver exactamente qué hacer con su precio y en qué meses. "
+               "Puedes buscar cualquier producto — incluyendo los sin recomendación, que te dirán por qué.")
+
+    # Construir opciones con etiqueta de recomendación
+    rec_emoji = {"Subir precio":"🔵","Mantener precio":"🟡",
+                 "Bajar / Promover":"🟢","No recomendable":"⚪"}
+    sku_options = ["— Ver resumen general de todos los productos —"] + [
+        f"{rec_emoji.get(r, '⚪')} {nm}"
+        for nm, r in zip(df_m1a["prod_nm"], df_m1a["recomendacion"])
+    ]
+    sel_sku_pred = st.selectbox("Producto:", sku_options, key="pred_sku_sel")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    if sel_sku_pred != "— Ver resumen general —":
+    if sel_sku_pred != "— Ver resumen general de todos los productos —":
         # ── MODO PRODUCTO ESPECÍFICO ──────────────────────────────────────────
-        sku_row  = df_m1a[df_m1a["prod_nm"] == sel_sku_pred].iloc[0]
-        sku_sim  = df_sim[df_sim["prod_nm"] == sel_sku_pred]
-        sku_cal  = df_cal[df_cal["prod_nm"] == sel_sku_pred] if len(df_cal) > 0 else pd.DataFrame()
+        # Extraer nombre real quitando el emoji del inicio
+        real_nm  = sel_sku_pred[2:].strip()
+        sku_row  = df_m1a[df_m1a["prod_nm"] == real_nm].iloc[0]
+        sku_sim  = df_sim[df_sim["prod_nm"] == real_nm]
+        sku_cal  = df_cal[df_cal["prod_nm"] == real_nm] if len(df_cal) > 0 else pd.DataFrame()
 
-        narr = generate_sku_narrative(sku_row, sku_sim, sku_cal)
+        narr  = generate_sku_narrative(sku_row, sku_sim, sku_cal)
+        rec_c = REC_COLORS.get(sku_row["recomendacion"], OM_LGRAY)
         if narr:
-            rec_c = REC_COLORS.get(sku_row["recomendacion"], OM_LGRAY)
             st.markdown(
                 f'<div class="narrative-box" style="border-left-color:{rec_c};">'
                 f'{narr.replace(chr(10),"<br>").replace("**","<strong>").replace("</strong><strong>","")}'

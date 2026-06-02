@@ -1001,10 +1001,7 @@ with tab2:
 
     # Seasonality — ordered correctly
     section("📆 Estacionalidad — promedio por mes del año")
-    seas = (df.groupby("mes_calendario")
-            .agg(venta_prom=("venta_con_iva","mean"),unidades_prom=("qty","mean"))
-            .reset_index().sort_values("mes_calendario"))
-    seas["mes_nombre"] = seas["mes_calendario"].map(MONTH_NAMES)
+    seas = agg["seas"]
     se1,se2 = st.columns(2)
     with se1:
         fig = px.line(seas, x="mes_nombre", y="venta_prom", title="Venta promedio por mes del año",
@@ -1197,9 +1194,6 @@ with tab3:
                     paper_bgcolor="white", plot_bgcolor="white",
                     xaxis=dict(side="top"), yaxis=dict(tickfont=dict(size=10)),
                 )
-                from plotly.graph_objects import layout as go_layout
-                from plotly.colors import unconvert_from_RGB_255
-                # Add legend manually
                 st.plotly_chart(fig_heat, use_container_width=True)
                 st.markdown(
                     '<span class="action-badge-subir">S = SUBIR PRECIO</span>&nbsp;&nbsp;'

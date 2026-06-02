@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Dynamic Pricing Analyzer v2 — Streamlit App | OfficeMax México"""
+"""Dynamic Pricing Analyzer v3 — Streamlit App | OfficeMax México"""
 
 import io, zipfile, warnings
 from pathlib import Path
@@ -19,7 +19,6 @@ warnings.filterwarnings("ignore")
 # CONSTANTS
 # ══════════════════════════════════════════════════════════════════════════════
 OM_RED   = "#E31837"
-OM_BLACK = "#1A1A1A"
 OM_BLUE  = "#1565C0"
 OM_GREEN = "#2E7D32"
 OM_AMBER = "#F9A825"
@@ -41,6 +40,7 @@ MONTH_NAMES = {
     1:"Ene",2:"Feb",3:"Mar",4:"Abr",5:"May",6:"Jun",
     7:"Jul",8:"Ago",9:"Sep",10:"Oct",11:"Nov",12:"Dic",
 }
+MONTH_ORDER = [MONTH_NAMES[i] for i in range(1, 13)]
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE CONFIG & CSS
@@ -57,44 +57,36 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap');
 html, body, [class*="css"] { font-family: 'Roboto', Arial, sans-serif !important; }
 .stApp { background-color: #F5F5F5 !important; }
-.main .block-container {
-    max-width: 1300px !important;
-    padding-top: 1rem !important;
-    padding-left: 2rem !important;
-    padding-right: 2rem !important;
-}
+.main .block-container { max-width:1300px !important; padding-top:1rem !important;
+    padding-left:2rem !important; padding-right:2rem !important; }
 [data-testid="stSidebar"] { background-color: #1A1A1A !important; }
 [data-testid="stSidebar"] * { color: #FFFFFF !important; }
-[data-testid="stSidebar"] .stMarkdown p { font-size: 13px !important; }
-.kpi-card {
-    background: white; border-radius: 12px; padding: 18px 12px;
-    text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.07);
-    border-top: 4px solid #E31837;
-}
-.kpi-value { font-size: 26px; font-weight: 900; color: #1A1A1A; }
-.kpi-label { font-size: 11px; color: #888; text-transform: uppercase;
-             letter-spacing: 0.5px; margin-top: 4px; }
-.section-header {
-    background: linear-gradient(135deg, #E31837 0%, #C41430 100%);
-    color: white; padding: 10px 18px; border-radius: 8px;
-    font-weight: 700; font-size: 15px; margin: 24px 0 10px 0;
-}
-.clean-step {
-    padding: 8px 12px; border-left: 4px solid #E31837;
-    margin: 5px 0; background: white; border-radius: 0 6px 6px 0; font-size: 13px;
-}
+[data-testid="stSidebar"] .stMarkdown p { font-size:13px !important; }
+.kpi-card { background:white; border-radius:12px; padding:18px 12px; text-align:center;
+    box-shadow:0 2px 8px rgba(0,0,0,0.07); border-top:4px solid #E31837; }
+.kpi-value { font-size:26px; font-weight:900; color:#1A1A1A; }
+.kpi-label { font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-top:4px; }
+.section-header { background:linear-gradient(135deg,#E31837 0%,#C41430 100%); color:white;
+    padding:10px 18px; border-radius:8px; font-weight:700; font-size:15px; margin:24px 0 10px 0; }
+.clean-step { padding:8px 12px; border-left:4px solid #E31837; margin:5px 0;
+    background:white; border-radius:0 6px 6px 0; font-size:13px; }
 .chip-green  { background:#2E7D32; color:white; padding:6px 18px; border-radius:20px;
-               font-weight:700; font-size:14px; display:inline-block; }
+    font-weight:700; font-size:14px; display:inline-block; }
 .chip-yellow { background:#F9A825; color:white; padding:6px 18px; border-radius:20px;
-               font-weight:700; font-size:14px; display:inline-block; }
+    font-weight:700; font-size:14px; display:inline-block; }
 .chip-red    { background:#E31837; color:white; padding:6px 18px; border-radius:20px;
-               font-weight:700; font-size:14px; display:inline-block; }
-.rec-card {
-    border-radius: 12px; padding: 18px; text-align: center;
-    background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.07);
-}
-.stTabs [data-baseweb="tab"] { padding: 10px 22px; font-weight: 600; }
-.stTabs [aria-selected="true"] { border-bottom: 3px solid #E31837; color: #E31837; }
+    font-weight:700; font-size:14px; display:inline-block; }
+.rec-card { border-radius:12px; padding:18px; text-align:center;
+    background:white; box-shadow:0 2px 8px rgba(0,0,0,0.07); }
+.narrative-box { background:white; border-radius:12px; padding:24px 28px;
+    border-left:6px solid #E31837; box-shadow:0 2px 8px rgba(0,0,0,0.07);
+    font-size:14px; line-height:1.8; color:#333; }
+.action-badge-subir    { background:#1565C0; color:white; padding:3px 10px;
+    border-radius:12px; font-size:11px; font-weight:700; }
+.action-badge-promover { background:#2E7D32; color:white; padding:3px 10px;
+    border-radius:12px; font-size:11px; font-weight:700; }
+.action-badge-mantener { background:#F9A825; color:white; padding:3px 10px;
+    border-radius:12px; font-size:11px; font-weight:700; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -107,41 +99,33 @@ for _k in ["df_main", "clean_report", "results"]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# DATA FUNCTIONS
+# DATA LOADING & CLEANING
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _identify(dfs: dict) -> dict:
+def _identify(dfs):
     out = {}
     for _, df in dfs.items():
         cols = set(df.columns)
-        if "apparent_unit_cost" in cols:
-            out["costos"] = df
-        elif "Precio_Unitario" in cols:
-            out["precios"] = df
-        elif "tran_nbr" in cols:
-            out["tickets"] = df
-        elif "tran_date" in cols and "venta_con_iva" in cols:
-            out["ventas"] = df
-        elif "prod_nm" in cols and "tipo_marca" in cols:
-            out["catalogo"] = df
+        if "apparent_unit_cost" in cols:       out["costos"]   = df
+        elif "Precio_Unitario" in cols:        out["precios"]  = df
+        elif "tran_nbr" in cols:               out["tickets"]  = df
+        elif "tran_date" in cols and "venta_con_iva" in cols: out["ventas"] = df
+        elif "prod_nm" in cols and "tipo_marca" in cols:      out["catalogo"] = df
     return out
 
 
 @st.cache_data(show_spinner=False)
 def load_and_clean(file_bytes: bytes):
     report = []
-
     raw = {}
     with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
         for name in z.namelist():
             if name.lower().endswith(".csv"):
                 with z.open(name) as f:
-                    raw[Path(name).stem.lower()] = pd.read_csv(
-                        f, encoding="latin-1", low_memory=False
-                    )
+                    raw[Path(name).stem.lower()] = pd.read_csv(f, encoding="latin-1", low_memory=False)
 
     files = _identify(raw)
-    missing = [k for k in ("ventas", "catalogo", "precios", "costos") if k not in files]
+    missing = [k for k in ("ventas","catalogo","precios","costos") if k not in files]
     if missing:
         raise ValueError(f"Archivos faltantes en el ZIP: {', '.join(missing)}")
 
@@ -154,8 +138,7 @@ def load_and_clean(file_bytes: bytes):
         df["prod_nbr"] = df["prod_nbr"].astype(str).str.strip()
 
     n0 = len(ventas)
-    report.append({"Paso": "📥 Ventas cargadas", "Eliminadas": "—",
-                   "Detalle": f"{n0:,} filas originales"})
+    report.append({"Paso":"📥 Ventas cargadas","Eliminadas":"—","Detalle":f"{n0:,} filas originales"})
 
     ventas["tran_date"]     = pd.to_datetime(ventas["tran_date"],    errors="coerce")
     ventas["qty"]           = pd.to_numeric(ventas["qty"],           errors="coerce")
@@ -164,47 +147,29 @@ def load_and_clean(file_bytes: bytes):
     ventas["margen"]        = pd.to_numeric(ventas["margen"],        errors="coerce")
 
     mask = ventas["tran_date"].isna() | ventas["qty"].isna() | ventas["venta_con_iva"].isna()
-    n_rm = int(mask.sum())
-    ventas = ventas[~mask].copy()
-    if n_rm:
-        report.append({"Paso": "🗑 Campos clave nulos", "Eliminadas": f"{n_rm:,}",
-                       "Detalle": "tran_date, qty o venta_con_iva vacíos"})
+    n_rm = int(mask.sum()); ventas = ventas[~mask].copy()
+    if n_rm: report.append({"Paso":"🗑 Campos clave nulos","Eliminadas":f"{n_rm:,}","Detalle":"tran_date, qty o venta_con_iva vacíos"})
 
     mask = (ventas["qty"] <= 0) | (ventas["venta_con_iva"] <= 0)
-    n_rm = int(mask.sum())
-    ventas = ventas[~mask].copy()
-    if n_rm:
-        report.append({"Paso": "🗑 Qty / Venta ≤ 0", "Eliminadas": f"{n_rm:,}",
-                       "Detalle": "Devoluciones, ajustes o errores de captura"})
+    n_rm = int(mask.sum()); ventas = ventas[~mask].copy()
+    if n_rm: report.append({"Paso":"🗑 Qty / Venta ≤ 0","Eliminadas":f"{n_rm:,}","Detalle":"Devoluciones, ajustes o errores de captura"})
 
-    n_rm = int(ventas.duplicated().sum())
-    ventas = ventas.drop_duplicates()
-    if n_rm:
-        report.append({"Paso": "🗑 Duplicados exactos", "Eliminadas": f"{n_rm:,}",
-                       "Detalle": "Filas 100% idénticas eliminadas"})
+    n_rm = int(ventas.duplicated().sum()); ventas = ventas.drop_duplicates()
+    if n_rm: report.append({"Paso":"🗑 Duplicados exactos","Eliminadas":f"{n_rm:,}","Detalle":"Filas 100% idénticas eliminadas"})
 
     ventas["precio_tx"] = ventas["venta_con_iva"] / ventas["qty"]
     p99 = ventas.groupby("dept_cd")["precio_tx"].transform(lambda x: x.quantile(0.99))
-    mask = ventas["precio_tx"] > p99
-    n_rm = int(mask.sum())
-    ventas = ventas[~mask].copy()
-    if n_rm:
-        report.append({"Paso": "🗑 Precios outlier (>p99 por depto)", "Eliminadas": f"{n_rm:,}",
-                       "Detalle": "Precio unitario > percentil 99 del departamento"})
+    mask = ventas["precio_tx"] > p99; n_rm = int(mask.sum()); ventas = ventas[~mask].copy()
+    if n_rm: report.append({"Paso":"🗑 Precios outlier (>p99)","Eliminadas":f"{n_rm:,}","Detalle":"Precio unitario > percentil 99 del departamento"})
 
-    report.append({"Paso": "✅ Ventas limpias", "Eliminadas": "—",
-                   "Detalle": f"{len(ventas):,} filas válidas quedan"})
+    report.append({"Paso":"✅ Ventas limpias","Eliminadas":"—","Detalle":f"{len(ventas):,} filas válidas"})
 
-    cat_slim = (catalogo[["prod_nbr","prod_nm","dept_nm","subdept_nm","class_nm",
-                           "marca_fabricante","tipo_marca"]]
-                .drop_duplicates("prod_nbr"))
-    prec_slim = (precios[["prod_nbr","Precio_Unitario"]]
-                 .rename(columns={"Precio_Unitario": "precio_catalogo"}))
-    cost_slim = (costos[["prod_nbr","apparent_unit_cost"]]
-                 .rename(columns={"apparent_unit_cost": "costo_unitario"}))
+    cat_slim  = catalogo[["prod_nbr","prod_nm","dept_nm","subdept_nm","class_nm","marca_fabricante","tipo_marca"]].drop_duplicates("prod_nbr")
+    prec_slim = precios[["prod_nbr","Precio_Unitario"]].rename(columns={"Precio_Unitario":"precio_catalogo"})
+    cost_slim = costos[["prod_nbr","apparent_unit_cost"]].rename(columns={"apparent_unit_cost":"costo_unitario"})
 
     df = (ventas
-          .merge(cat_slim,  on="prod_nbr", how="left", suffixes=("", "_cat"))
+          .merge(cat_slim,  on="prod_nbr", how="left", suffixes=("","_cat"))
           .merge(prec_slim, on="prod_nbr", how="left")
           .merge(cost_slim, on="prod_nbr", how="left"))
 
@@ -212,15 +177,10 @@ def load_and_clean(file_bytes: bytes):
     df["año"]            = df["tran_date"].dt.year
     df["mes_calendario"] = df["tran_date"].dt.month
     df["es_premium"]     = df["prod_nm"].apply(
-        lambda n: int(any(k in str(n).upper() for k in KEYWORDS_PREMIUM))
-        if pd.notna(n) else 0
-    )
+        lambda n: int(any(k in str(n).upper() for k in KEYWORDS_PREMIUM)) if pd.notna(n) else 0)
 
-    report.append({"Paso": "🔗 Merge final", "Eliminadas": "—",
-                   "Detalle": (f"{len(df):,} filas · "
-                               f"{df['prod_nbr'].nunique():,} SKUs · "
-                               f"{df['store_nbr'].nunique()} tiendas · "
-                               f"{df['mes_str'].nunique()} meses")})
+    report.append({"Paso":"🔗 Merge final","Eliminadas":"—",
+                   "Detalle":f"{len(df):,} filas · {df['prod_nbr'].nunique():,} SKUs · {df['store_nbr'].nunique()} tiendas · {df['mes_str'].nunique()} meses"})
 
     return df, pd.DataFrame(report)
 
@@ -231,290 +191,287 @@ def load_and_clean(file_bytes: bytes):
 
 def _ols_loglog(subset, min_obs, min_cv, min_r2, max_beta):
     n = len(subset)
-    if n < min_obs:
-        return None
-    std_p  = subset["log_p"].std()
-    if std_p < 1e-6:
-        return None
+    if n < min_obs: return None
+    std_p = subset["log_p"].std()
+    if std_p < 1e-6: return None
     mean_p = abs(subset["log_p"].mean())
-    if mean_p > 1e-9 and (std_p / mean_p) < min_cv:
-        return None
+    if mean_p > 1e-9 and (std_p / mean_p) < min_cv: return None
     try:
-        y   = subset["log_u1"].values
-        X   = add_constant(subset["log_p"].values)
+        y = subset["log_u1"].values
+        X = add_constant(subset["log_p"].values)
         res = OLS(y, X).fit()
-        beta = float(res.params[1])
-        r2   = float(res.rsquared)
-        if r2 < min_r2 or abs(beta) > max_beta:
-            return None
-        rmse = float(np.sqrt(np.mean((y - res.fittedvalues) ** 2)))
-        return {
-            "alpha": round(float(res.params[0]), 4),
-            "beta":  round(beta, 4),
-            "r2":    round(r2, 4),
-            "rmse":  round(rmse, 4),
-            "n":     n,
-            "pval":  round(float(res.pvalues[1]), 4),
-        }
-    except Exception:
-        return None
+        beta = float(res.params[1]); r2 = float(res.rsquared)
+        if r2 < min_r2 or abs(beta) > max_beta: return None
+        return {"alpha":round(float(res.params[0]),4),"beta":round(beta,4),"r2":round(r2,4),
+                "rmse":round(float(np.sqrt(np.mean((y-res.fittedvalues)**2))),4),
+                "n":n,"pval":round(float(res.pvalues[1]),4)}
+    except Exception: return None
 
 
 def _build_monthly(df):
     df2 = df.copy()
     df2["mes"] = pd.PeriodIndex(df2["mes_str"], freq="M")
-    mensual = (
-        df2.groupby(["prod_nbr", "mes"])
-        .agg(
-            unidades   = ("qty",           "sum"),
-            venta_tot  = ("venta_con_iva", "sum"),
-            es_premium = ("es_premium",    "max"),
-            prod_nm    = ("prod_nm",       "first"),
-            subdept_nm = ("subdept_nm",    "first"),
-            dept_nm    = ("dept_nm",       "first"),
-            margen_avg = ("margen",        "mean"),
-            costo_unit = ("costo_unitario","mean"),
-        )
-        .reset_index()
-    )
+    mensual = (df2.groupby(["prod_nbr","mes"])
+               .agg(unidades=("qty","sum"), venta_tot=("venta_con_iva","sum"),
+                    es_premium=("es_premium","max"), prod_nm=("prod_nm","first"),
+                    subdept_nm=("subdept_nm","first"), dept_nm=("dept_nm","first"),
+                    margen_avg=("margen","mean"), costo_unit=("costo_unitario","mean"))
+               .reset_index())
     mensual["precio"] = mensual["venta_tot"] / mensual["unidades"]
     mensual = mensual[mensual["precio"] > 0].copy()
     mensual["log_u1"] = np.log1p(mensual["unidades"])
     mensual["log_p"]  = np.log(mensual["precio"])
     mensual["mes_dt"] = mensual["mes"].dt.to_timestamp()
-    return mensual.sort_values(["prod_nbr", "mes"]).reset_index(drop=True)
+    mensual["mes_cal"]= mensual["mes_dt"].dt.month
+    return mensual.sort_values(["prod_nbr","mes"]).reset_index(drop=True)
+
+
+def _compute_monthly_calendar(mensual, df_m1a):
+    """Seasonal action calendar: for each SKU x calendar month, recommend SUBIR/PROMOVER/MANTENER."""
+    valid = df_m1a[df_m1a["recomendacion"].isin(["Subir precio","Mantener precio","Bajar / Promover"])]
+    rows = []
+    for _, sk in valid.iterrows():
+        sku_data = mensual[mensual["prod_nbr"] == sk["prod_nbr"]]
+        if len(sku_data) < 3: continue
+        monthly = (sku_data.groupby("mes_cal")
+                   .agg(u_prom=("unidades","mean"), p_prom=("precio","mean"))
+                   .reset_index())
+        u_mean = monthly["u_prom"].mean()
+        if u_mean <= 0: continue
+        monthly["u_idx"] = monthly["u_prom"] / u_mean
+        for _, mrow in monthly.iterrows():
+            mes = int(mrow["mes_cal"]); u_idx = mrow["u_idx"]
+            if u_idx >= 1.10:
+                accion = "SUBIR" if sk["recomendacion"] == "Subir precio" else "PROMOVER"
+            elif u_idx <= 0.90:
+                accion = "PROMOVER" if sk["recomendacion"] in ("Bajar / Promover","Mantener precio") else "MANTENER"
+            else:
+                accion = "MANTENER"
+            rows.append({"prod_nbr":sk["prod_nbr"],"prod_nm":sk["prod_nm"],
+                          "mes_cal":mes,"mes_nombre":MONTH_NAMES[mes],
+                          "accion":accion,"u_idx":round(u_idx,2),
+                          "recomendacion":sk["recomendacion"],"beta":sk["beta"]})
+    return pd.DataFrame(rows)
 
 
 @st.cache_data(show_spinner=False)
-def run_models(df_csv: bytes, min_obs: int, min_cv: float, min_r2: float,
-               max_beta: float, pval_thresh: float, run_rolling: bool):
+def run_models(df_csv: bytes, min_obs, min_cv, min_r2, max_beta, pval_thresh, run_rolling):
     df = pd.read_csv(io.BytesIO(df_csv), low_memory=False)
     df["tran_date"] = pd.to_datetime(df["tran_date"], errors="coerce")
-
     mensual = _build_monthly(df)
     todos_meses = sorted(mensual["mes"].unique())
     params = dict(min_obs=min_obs, min_cv=min_cv, min_r2=min_r2, max_beta=max_beta)
 
-    # M1A — todos los meses por SKU
+    # M1A
     rows_m1a = []
     for sku, grp in mensual.groupby("prod_nbr"):
         r = _ols_loglog(grp, **params)
         if r:
-            rows_m1a.append({
-                "prod_nbr":   sku,
-                "prod_nm":    grp["prod_nm"].iloc[0],
-                "subdept_nm": grp["subdept_nm"].iloc[0],
-                "dept_nm":    grp["dept_nm"].iloc[0],
-                "n_meses":    len(grp),
-                **r,
-            })
+            rows_m1a.append({"prod_nbr":sku,"prod_nm":grp["prod_nm"].iloc[0],
+                              "subdept_nm":grp["subdept_nm"].iloc[0],"dept_nm":grp["dept_nm"].iloc[0],
+                              "n_meses":len(grp),**r})
     df_m1a = pd.DataFrame(rows_m1a)
 
-    # M1B — rolling 3 meses
+    # M1B rolling 3m
     df_m1b = pd.DataFrame()
     df_m1c = pd.DataFrame()
-
     if run_rolling and len(todos_meses) >= 3:
-        rows_m1b = []
+        rows = []
         for sku, grp in mensual.groupby("prod_nbr"):
             gi = grp.set_index("mes")
-            for i in range(len(todos_meses) - 2):
-                vent = todos_meses[i: i + 3]
-                sub  = gi[gi.index.isin(vent)]
-                r    = _ols_loglog(sub, **params)
-                if r:
-                    rows_m1b.append({
-                        "prod_nbr":   sku,
-                        "prod_nm":    grp["prod_nm"].iloc[0],
-                        "mes_inicio": str(vent[0]),
-                        "mes_fin":    str(vent[-1]),
-                        "mes_fin_dt": vent[-1].to_timestamp(),
-                        **r,
-                    })
-        df_m1b = pd.DataFrame(rows_m1b)
+            for i in range(len(todos_meses)-2):
+                vent = todos_meses[i:i+3]; sub = gi[gi.index.isin(vent)]
+                r = _ols_loglog(sub, **params)
+                if r: rows.append({"prod_nbr":sku,"prod_nm":grp["prod_nm"].iloc[0],
+                                    "mes_inicio":str(vent[0]),"mes_fin":str(vent[-1]),
+                                    "mes_fin_dt":vent[-1].to_timestamp(),**r})
+        df_m1b = pd.DataFrame(rows)
 
     if run_rolling and len(todos_meses) >= 6:
-        rows_m1c = []
+        rows = []
         for sku, grp in mensual.groupby("prod_nbr"):
             gi = grp.set_index("mes")
-            for i in range(len(todos_meses) - 5):
-                vent = todos_meses[i: i + 6]
-                sub  = gi[gi.index.isin(vent)]
-                r    = _ols_loglog(sub, **params)
-                if r:
-                    rows_m1c.append({
-                        "prod_nbr":   sku,
-                        "prod_nm":    grp["prod_nm"].iloc[0],
-                        "mes_inicio": str(vent[0]),
-                        "mes_fin":    str(vent[-1]),
-                        "mes_fin_dt": vent[-1].to_timestamp(),
-                        **r,
-                    })
-        df_m1c = pd.DataFrame(rows_m1c)
+            for i in range(len(todos_meses)-5):
+                vent = todos_meses[i:i+6]; sub = gi[gi.index.isin(vent)]
+                r = _ols_loglog(sub, **params)
+                if r: rows.append({"prod_nbr":sku,"prod_nm":grp["prod_nm"].iloc[0],
+                                    "mes_inicio":str(vent[0]),"mes_fin":str(vent[-1]),
+                                    "mes_fin_dt":vent[-1].to_timestamp(),**r})
+        df_m1c = pd.DataFrame(rows)
 
-    # M2 — extendido con dummies tienda + mes + premium + margen
-    agg2 = (
-        df.groupby(["prod_nbr", "store_nbr", "mes_str"])
-        .agg(
-            unidades   = ("qty",           "sum"),
-            venta_tot  = ("venta_con_iva", "sum"),
-            es_premium = ("es_premium",    "max"),
-            margen     = ("margen",        "mean"),
-        )
-        .reset_index()
-    )
+    # M2 extendido
+    agg2 = (df.groupby(["prod_nbr","store_nbr","mes_str"])
+            .agg(unidades=("qty","sum"), venta_tot=("venta_con_iva","sum"),
+                 es_premium=("es_premium","max"), margen=("margen","mean"))
+            .reset_index())
     agg2["precio"] = agg2["venta_tot"] / agg2["unidades"]
     agg2 = agg2[agg2["precio"] > 0].copy()
-    agg2["log_u1"] = np.log1p(agg2["unidades"])
-    agg2["log_p"]  = np.log(agg2["precio"])
+    agg2["log_u1"] = np.log1p(agg2["unidades"]); agg2["log_p"] = np.log(agg2["precio"])
 
     ohe_s = OneHotEncoder(sparse_output=False, drop="first", handle_unknown="ignore")
-    s_enc = ohe_s.fit_transform(agg2[["store_nbr"]])
-    s_cols = [f"s_{c}" for c in ohe_s.categories_[0][1:]]
-
+    s_enc = ohe_s.fit_transform(agg2[["store_nbr"]]); s_cols = [f"s_{c}" for c in ohe_s.categories_[0][1:]]
     ohe_m = OneHotEncoder(sparse_output=False, drop="first", handle_unknown="ignore")
-    m_enc = ohe_m.fit_transform(agg2[["mes_str"]])
-    m_cols = [f"m_{c}" for c in ohe_m.categories_[0][1:]]
+    m_enc = ohe_m.fit_transform(agg2[["mes_str"]]);  m_cols = [f"m_{c}" for c in ohe_m.categories_[0][1:]]
 
-    X2 = pd.concat([
-        pd.DataFrame({
-            "log_precio": agg2["log_p"].values,
-            "es_premium": agg2["es_premium"].values,
-            "margen":     agg2["margen"].fillna(0).values,
-        }, index=agg2.index),
-        pd.DataFrame(s_enc, columns=s_cols, index=agg2.index),
-        pd.DataFrame(m_enc, columns=m_cols, index=agg2.index),
-    ], axis=1)
-
-    X2  = add_constant(X2)
-    y2  = agg2["log_u1"].values
+    X2 = pd.concat([pd.DataFrame({"log_precio":agg2["log_p"].values,
+                                   "es_premium":agg2["es_premium"].values,
+                                   "margen":agg2["margen"].fillna(0).values}, index=agg2.index),
+                    pd.DataFrame(s_enc, columns=s_cols, index=agg2.index),
+                    pd.DataFrame(m_enc, columns=m_cols, index=agg2.index)], axis=1)
+    X2 = add_constant(X2); y2 = agg2["log_u1"].values
     msk = np.isfinite(X2.values).all(axis=1) & np.isfinite(y2)
     mod2 = OLS(y2[msk], X2[msk]).fit()
-    rmse2 = float(np.sqrt(np.mean((y2[msk] - mod2.fittedvalues) ** 2)))
+    m2 = {"n_obs":int(mod2.nobs),"r2":round(float(mod2.rsquared),4),
+          "r2_adj":round(float(mod2.rsquared_adj),4),
+          "beta":round(float(mod2.params["log_precio"]),4),
+          "beta_pval":round(float(mod2.pvalues["log_precio"]),4),
+          "premium":round(float(mod2.params["es_premium"]),4),
+          "prem_pval":round(float(mod2.pvalues["es_premium"]),4),
+          "rmse":round(float(np.sqrt(np.mean((y2[msk]-mod2.fittedvalues)**2))),4),
+          "f_stat":round(float(mod2.fvalue),2)}
 
-    m2 = {
-        "n_obs":     int(mod2.nobs),
-        "r2":        round(float(mod2.rsquared), 4),
-        "r2_adj":    round(float(mod2.rsquared_adj), 4),
-        "beta":      round(float(mod2.params["log_precio"]), 4),
-        "beta_pval": round(float(mod2.pvalues["log_precio"]), 4),
-        "premium":   round(float(mod2.params["es_premium"]), 4),
-        "prem_pval": round(float(mod2.pvalues["es_premium"]), 4),
-        "rmse":      round(rmse2, 4),
-        "f_stat":    round(float(mod2.fvalue), 2),
-    }
-
-    # Classify SKUs
+    # Classify — cap económico en |b|>3 (betas más extremas no son creíbles en retail)
     def _classify(row):
         b, p, n = row["beta"], row["pval"], row["n_meses"]
-        if p >= pval_thresh or n < min_obs or abs(b) > 3 or b > 0:
-            return "No recomendable"
-        if -1 < b < 0:
-            return "Subir precio"
-        if -1.5 <= b <= -1:
-            return "Mantener precio"
+        if p >= pval_thresh or n < min_obs or b > 0 or abs(b) > 3: return "No recomendable"
+        if -1 < b < 0:         return "Subir precio"
+        if -1.5 <= b <= -1:    return "Mantener precio"
         return "Bajar / Promover"
 
     if len(df_m1a) > 0:
         df_m1a["recomendacion"] = df_m1a.apply(_classify, axis=1)
 
-    # Price simulation
+    # Simulation
     base_stats = mensual.groupby("prod_nbr").agg(
-        precio_base   = ("precio",    "mean"),
-        unidades_base = ("unidades",  "mean"),
-        costo_unit    = ("costo_unit","mean"),
-    ).reset_index()
-
-    scenarios = [-0.10, -0.05, 0.00, 0.05, 0.10]
-    labels    = ["-10%", "-5%", "Base 0%", "+5%", "+10%"]
-    sim_rows  = []
-
+        precio_base=("precio","mean"), unidades_base=("unidades","mean"),
+        costo_unit=("costo_unit","mean")).reset_index()
+    scenarios = [-0.10,-0.05,0.00,0.05,0.10]; labels = ["-10%","-5%","Base 0%","+5%","+10%"]
+    sim_rows = []
     if len(df_m1a) > 0:
-        sim_input = df_m1a.merge(base_stats, on="prod_nbr", how="left")
-        for _, row in sim_input.iterrows():
+        for _, row in df_m1a.merge(base_stats, on="prod_nbr", how="left").iterrows():
             p0, u0, beta = row.get("precio_base"), row.get("unidades_base"), row["beta"]
-            if pd.isna(p0) or pd.isna(u0):
-                continue
-            c0   = row.get("costo_unit", 0)
-            c0   = 0 if pd.isna(c0) else float(c0)
-            rev0  = p0 * u0
-            marg0 = (p0 - c0) * u0 or 1e-9
+            if pd.isna(p0) or pd.isna(u0): continue
+            c0 = float(row.get("costo_unit",0) or 0)
+            rev0 = p0*u0; marg0 = (p0-c0)*u0 or 1e-9
             for chg, lbl in zip(scenarios, labels):
-                p1    = p0 * (1 + chg)
-                u1    = u0 * ((1 + chg) ** beta)
-                rev1  = p1 * u1
-                marg1 = (p1 - c0) * u1
-                sim_rows.append({
-                    "prod_nbr":          row["prod_nbr"],
-                    "prod_nm":           row["prod_nm"],
-                    "beta":              round(beta, 4),
-                    "recomendacion":     row.get("recomendacion", ""),
-                    "cambio":            lbl,
-                    "precio_nuevo":      round(p1, 2),
-                    "unidades_est":      round(u1, 1),
-                    "ingreso_est":       round(rev1, 2),
-                    "margen_est":        round(marg1, 2),
-                    "delta_ingreso_pct": round((rev1 - rev0) / rev0 * 100, 1) if rev0 else 0,
-                    "delta_margen_pct":  round((marg1 - marg0) / marg0 * 100, 1),
-                })
+                p1=p0*(1+chg); u1=u0*((1+chg)**beta); rev1=p1*u1; marg1=(p1-c0)*u1
+                sim_rows.append({"prod_nbr":row["prod_nbr"],"prod_nm":row["prod_nm"],
+                                  "beta":round(beta,4),"recomendacion":row.get("recomendacion",""),
+                                  "cambio":lbl,"precio_nuevo":round(p1,2),"unidades_est":round(u1,1),
+                                  "ingreso_est":round(rev1,2),"margen_est":round(marg1,2),
+                                  "delta_ingreso_pct":round((rev1-rev0)/rev0*100,1) if rev0 else 0,
+                                  "delta_margen_pct":round((marg1-marg0)/marg0*100,1)})
 
-    mensual_out = mensual.copy()
-    mensual_out["mes"] = mensual_out["mes"].astype(str)
+    # Monthly calendar
+    df_cal = _compute_monthly_calendar(mensual, df_m1a) if len(df_m1a) > 0 else pd.DataFrame()
 
-    return {
-        "m1a":     df_m1a,
-        "m1b":     df_m1b,
-        "m1c":     df_m1c,
-        "m2":      m2,
-        "sim":     pd.DataFrame(sim_rows),
-        "mensual": mensual_out,
-        "n_total": mensual["prod_nbr"].nunique(),
-    }
+    mensual_out = mensual.copy(); mensual_out["mes"] = mensual_out["mes"].astype(str)
+    return {"m1a":df_m1a,"m1b":df_m1b,"m1c":df_m1c,"m2":m2,
+            "sim":pd.DataFrame(sim_rows),"mensual":mensual_out,
+            "cal":df_cal,"n_total":mensual["prod_nbr"].nunique()}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NARRATIVE GENERATOR
+# ══════════════════════════════════════════════════════════════════════════════
+
+def generate_narrative(df_m1a, m2, df_cal):
+    n_tot   = len(df_m1a)
+    n_subir = len(df_m1a[df_m1a["recomendacion"] == "Subir precio"])
+    n_prom  = len(df_m1a[df_m1a["recomendacion"] == "Bajar / Promover"])
+    n_mant  = len(df_m1a[df_m1a["recomendacion"] == "Mantener precio"])
+    n_norec = len(df_m1a[df_m1a["recomendacion"] == "No recomendable"])
+    n_valid = n_subir + n_prom + n_mant
+
+    top_subir = df_m1a[df_m1a["recomendacion"]=="Subir precio"].sort_values("beta",ascending=False)
+    top_prom  = df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"].sort_values("beta")
+
+    mejor_subir = top_subir["prod_nm"].iloc[0][:35] if len(top_subir) > 0 else "N/A"
+    mejor_prom  = top_prom["prod_nm"].iloc[0][:35]  if len(top_prom)  > 0 else "N/A"
+
+    r2_interp = "buena" if m2["r2"] >= 0.4 else ("aceptable" if m2["r2"] >= 0.15 else "baja")
+    beta_interp = f"{m2['beta']:.2f}"
+    sig = "sí es estadísticamente significativa" if m2["beta_pval"] < 0.10 else "no es estadísticamente significativa"
+
+    meses_subir, meses_prom = [], []
+    if len(df_cal) > 0:
+        ms = df_cal[df_cal["accion"]=="SUBIR"]["mes_nombre"].value_counts().head(3).index.tolist()
+        mp = df_cal[df_cal["accion"]=="PROMOVER"]["mes_nombre"].value_counts().head(3).index.tolist()
+        meses_subir = ms; meses_prom = mp
+
+    lines = [
+        f"Se analizaron **{n_tot:,} SKUs** en total. "
+        f"De estos, **{n_valid} tienen un modelo de elasticidad confiable** con los parámetros actuales "
+        f"({n_norec} fueron descartados por poca variación de precio o baja significancia estadística).",
+        "",
+        f"🔵 **{n_subir} productos son inelásticos** (recomendación: *Subir precio*). "
+        f"Sus consumidores no cambian mucho su comportamiento de compra ante subidas de precio. "
+        f"Subir el precio generaría más ingresos sin perder muchas ventas. "
+        + (f"El mejor candidato es **{mejor_subir}**." if n_subir > 0 else ""),
+        "",
+        f"🟢 **{n_prom} productos son elásticos** (recomendación: *Promover o bajar precio*). "
+        f"Los clientes son muy sensibles al precio — hacer descuentos o promociones en estos "
+        f"productos aumentaría el volumen de ventas de forma significativa. "
+        + (f"El más elástico es **{mejor_prom}**." if n_prom > 0 else ""),
+        "",
+        f"🟡 **{n_mant} productos** se recomienda mantener el precio actual (elasticidad cercana a -1).",
+        "",
+        f"📊 El modelo global explica el **{m2['r2']*100:.1f}%** de la variación en ventas "
+        f"(R² {r2_interp}). La relación precio-demanda {sig} "
+        f"(β={beta_interp}, p={m2['beta_pval']:.3f}).",
+    ]
+
+    if meses_subir:
+        lines += ["", f"📅 **Mejores meses para subir precios:** {', '.join(meses_subir)} "
+                  f"(alta demanda histórica)."]
+    if meses_prom:
+        lines += [f"📅 **Mejores meses para promover:** {', '.join(meses_prom)} "
+                  f"(demanda baja — los descuentos tienen más impacto)."]
+
+    return "\n".join(lines)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # UI HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def section(title: str):
+def section(title):
     st.markdown(f'<div class="section-header">{title}</div>', unsafe_allow_html=True)
 
-
-def kpi(col, label: str, value: str, color: str = OM_RED):
-    col.markdown(
-        f'<div class="kpi-card" style="border-top-color:{color};">'
-        f'<div class="kpi-value">{value}</div>'
-        f'<div class="kpi-label">{label}</div></div>',
-        unsafe_allow_html=True,
-    )
-
+def kpi(col, label, value, color=OM_RED):
+    col.markdown(f'<div class="kpi-card" style="border-top-color:{color};">'
+                 f'<div class="kpi-value">{value}</div>'
+                 f'<div class="kpi-label">{label}</div></div>', unsafe_allow_html=True)
 
 def traffic_light(r2, beta, pval, rmse):
-    score = 0
-    reasons = []
-    if r2 >= 0.5:    score += 2; reasons.append(f"✅ R² = {r2:.3f} — bueno (≥ 0.5)")
-    elif r2 >= 0.25: score += 1; reasons.append(f"⚠️ R² = {r2:.3f} — aceptable")
-    else:                        reasons.append(f"❌ R² = {r2:.3f} — bajo")
-    if pval < 0.05:  score += 2; reasons.append(f"✅ p-valor = {pval:.4f} — significativo")
-    elif pval < 0.10:score += 1; reasons.append(f"⚠️ p-valor = {pval:.4f} — marginal")
-    else:                        reasons.append(f"❌ p-valor = {pval:.4f} — no significativo")
-    if beta < 0 and abs(beta) <= 3:
-        score += 1; reasons.append(f"✅ Beta = {beta:.4f} — negativa e interpretable")
-    else:            reasons.append(f"❌ Beta = {beta:.4f} — fuera de rango")
-    if rmse < 0.5:   score += 1; reasons.append(f"✅ RMSE = {rmse:.4f} — error bajo")
-    else:            reasons.append(f"⚠️ RMSE = {rmse:.4f} — error moderado")
-    if score >= 5:   css, msg = "chip-green",  "🟢 Modelo confiable — apto para decisiones"
-    elif score >= 3: css, msg = "chip-yellow", "🟡 Modelo aceptable — úsalo con precaución"
-    else:            css, msg = "chip-red",    "🔴 Modelo débil — revisa parámetros o datos"
+    score = 0; reasons = []
+    if r2 >= 0.4:    score+=2; reasons.append(f"✅ R² = {r2:.3f} — bueno")
+    elif r2 >= 0.15: score+=1; reasons.append(f"⚠️ R² = {r2:.3f} — aceptable (normal en retail)")
+    else:                      reasons.append(f"❌ R² = {r2:.3f} — bajo")
+    if pval < 0.05:  score+=2; reasons.append(f"✅ p-valor = {pval:.4f} — significativo")
+    elif pval < 0.10:score+=1; reasons.append(f"⚠️ p-valor = {pval:.4f} — marginalmente significativo")
+    else:                      reasons.append(f"❌ p-valor = {pval:.4f} — no significativo")
+    if beta < 0 and abs(beta) <= 5:
+        score+=1; reasons.append(f"✅ Beta = {beta:.4f} — negativa e interpretable")
+    else:            reasons.append(f"❌ Beta = {beta:.4f} — fuera de rango económico")
+    if rmse < 0.5:   score+=1; reasons.append(f"✅ RMSE = {rmse:.4f} — error bajo")
+    else:            reasons.append(f"⚠️ RMSE = {rmse:.4f} — error moderado (normal con muchas tiendas)")
+    if score >= 5:   css,msg = "chip-green",  "🟢 Modelo confiable — resultados interpretables"
+    elif score >= 3: css,msg = "chip-yellow", "🟡 Modelo aceptable — úsalo con precaución"
+    else:            css,msg = "chip-red",    "🔴 Modelo débil — reduce los parámetros mínimos"
     return css, msg, reasons
 
-
 def _layout(fig, h=320):
-    fig.update_layout(
-        plot_bgcolor="white", paper_bgcolor="white",
-        height=h, margin=dict(t=45, b=20, l=20, r=20),
-        font=dict(family="Roboto, Arial"),
-    )
+    fig.update_layout(plot_bgcolor="white", paper_bgcolor="white",
+                      height=h, margin=dict(t=45,b=20,l=20,r=20),
+                      font=dict(family="Roboto, Arial"))
+    return fig
+
+def _fmt_bar(fig, values, prefix="$", suffix="", decimals=0):
+    """Add formatted text labels to a bar chart without text_auto."""
+    fmt = f"{prefix}{{:,.{decimals}f}}{suffix}"
+    fig.update_traces(text=[fmt.format(v) for v in values], textposition="outside",
+                      textfont=dict(size=11))
     return fig
 
 
@@ -531,7 +488,7 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     st.markdown("### 📦 Cargar datos")
-    st.caption("Sube el ZIP con los 4 archivos CSV: ventas, catálogo, precios y costos.")
+    st.caption("Sube el ZIP con los 4 archivos CSV.")
     uploaded = st.file_uploader("Archivo .ZIP", type=["zip"], label_visibility="collapsed")
 
     if uploaded:
@@ -548,17 +505,11 @@ with st.sidebar:
                 st.error(f"❌ {e}")
 
     st.markdown("<hr style='border-color:#333; margin:16px 0;'>", unsafe_allow_html=True)
-    st.caption(
-        "**Flujo recomendado:**\n\n"
-        "1. Sube el ZIP\n"
-        "2. **Calculadora** → ajusta parámetros → ejecuta\n"
-        "3. **Descriptivo** → explora los datos\n"
-        "4. **Predictivo** → analiza resultados"
-    )
+    st.caption("**Flujo recomendado:**\n\n1. Sube el ZIP\n2. **Calculadora** → ejecuta el modelo\n3. **Descriptivo** → explora los datos\n4. **Predictivo** → ve qué hacer")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# LANDING PAGE (no data)
+# LANDING
 # ══════════════════════════════════════════════════════════════════════════════
 df_main      = st.session_state["df_main"]
 clean_report = st.session_state["clean_report"]
@@ -579,36 +530,19 @@ if df_main is None:
                 Sube tu archivo ZIP en el panel izquierdo
             </p>
             <p style="color:#666; font-size:13px; margin:0;">
-                El ZIP debe contener los archivos:<br>
-                Ventas · Catálogo · Precios · Costos
+                El ZIP debe contener: Ventas · Catálogo · Precios · Costos
             </p>
-        </div>
-        <div style="display:flex; justify-content:center; gap:40px; margin-top:48px; flex-wrap:wrap;">
-            <div><div style="font-size:30px;">🧮</div><strong>Calculadora</strong>
-                 <p style="font-size:12px; color:#888; margin:4px 0;">Modelo OLS log-log por SKU</p></div>
-            <div><div style="font-size:30px;">📈</div><strong>Descriptivo</strong>
-                 <p style="font-size:12px; color:#888; margin:4px 0;">KPIs y tendencias de ventas</p></div>
-            <div><div style="font-size:30px;">🎯</div><strong>Predictivo</strong>
-                 <p style="font-size:12px; color:#888; margin:4px 0;">Simulador y recomendaciones</p></div>
         </div>
     </div>
     """, unsafe_allow_html=True)
     st.stop()
 
+tab1, tab2, tab3 = st.tabs(["🧮  Calculadora","📈  Dashboard Descriptivo","🎯  Dashboard Predictivo"])
+
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TABS
-# ══════════════════════════════════════════════════════════════════════════════
-tab1, tab2, tab3 = st.tabs([
-    "🧮  Calculadora",
-    "📈  Dashboard Descriptivo",
-    "🎯  Dashboard Predictivo",
-])
-
-
-# ────────────────────────────────────────────────────────────────────────────
 # TAB 1 — CALCULADORA
-# ────────────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
 with tab1:
     with st.expander("📋 Reporte de limpieza de datos", expanded=False):
         for _, row in clean_report.iterrows():
@@ -618,505 +552,546 @@ with tab1:
                 f'<strong>{row["Paso"]}</strong>&nbsp;&nbsp;'
                 f'<span style="color:{OM_RED}; font-weight:700;">{row["Eliminadas"]}</span>'
                 f'&nbsp;&nbsp;<span style="color:#555;">{row["Detalle"]}</span></div>',
-                unsafe_allow_html=True,
-            )
+                unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-    section("⚙️ Parámetros del modelo de elasticidad")
-    st.caption(
-        "Ajusta estos valores antes de ejecutar. Determinan qué SKUs son suficientemente "
-        "confiables para tomar decisiones de precio."
-    )
+    section("⚙️ Parámetros del modelo")
+    st.caption("Ajusta estos valores antes de ejecutar. Si salen pocos productos, reduce el mínimo de meses o el CV.")
 
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1,c2,c3,c4,c5 = st.columns(5)
     with c1:
         min_obs = st.slider("Meses mínimos por SKU", 3, 18, 6,
-            help="El modelo necesita al menos N meses de datos por SKU. Con muy pocos, los resultados son poco confiables.")
+            help="Mínimo de meses con datos para analizar un SKU. Con menos de 6 los resultados son poco confiables. Baja a 4-5 solo si salen muy pocos productos.")
     with c2:
-        min_r2 = st.slider("R² mínimo", 0.0, 0.7, 0.0, 0.05,
-            help="R² mide qué tanto explica el modelo (0=nada, 1=perfecto). En 0 no filtras nada.")
+        min_r2 = st.slider("R² mínimo", 0.0, 0.5, 0.0, 0.05,
+            help="Qué tan bien explica el precio las ventas. En retail 0.10-0.20 ya es aceptable. No uses 0.7+.")
     with c3:
         max_beta = st.slider("|Beta| máximo", 2.0, 15.0, 10.0, 0.5,
-            help="Beta es la elasticidad. Valores mayores a 10 suelen ser errores estadísticos.")
+            help="Elasticidad máxima aceptable. Betas mayores a 5 suelen ser errores estadísticos.")
     with c4:
-        min_cv_pct = st.slider("CV mínimo de precio (%)", 0.0, 10.0, 2.0, 0.5,
-            help="Si un producto siempre tuvo el mismo precio, no podemos estimar elasticidad.")
+        min_cv_pct = st.slider("CV mínimo de precio (%)", 0.0, 10.0, 1.0, 0.5,
+            help="Si el precio nunca cambió, no se puede estimar elasticidad. 1% es un umbral permisivo.")
         min_cv = min_cv_pct / 100
     with c5:
         pval_thresh = st.slider("p-valor máximo", 0.05, 0.25, 0.10, 0.05,
-            help="p-valor máximo para considerar que beta es estadísticamente válida. 0.10 = 90% de confianza.")
+            help="Qué tan seguro eres de la beta. 0.10 = 90% de confianza (estándar en negocios).")
 
     run_rolling = st.checkbox(
-        "Calcular análisis rolling trimestral y semestral (más lento ~1-3 min extra)",
-        value=False,
-        help="Activa para ver cómo cambia la elasticidad a lo largo del tiempo.",
-    )
+        "Calcular Tendencia Trimestral y Semestral (~1-3 min extra)", value=False,
+        help="Activa para ver cómo cambia la elasticidad a lo largo del tiempo (ventanas de 3 y 6 meses). Necesario para el calendario temporal detallado.")
 
     st.markdown("<br>", unsafe_allow_html=True)
     run_btn = st.button("▶️  Ejecutar análisis de elasticidad", type="primary")
 
     if run_btn:
-        with st.spinner("Calculando modelos de elasticidad... puede tomar hasta 2 minutos."):
+        with st.spinner("Calculando modelos..."):
             try:
                 csv_bytes = df_main.to_csv(index=False).encode("utf-8")
-                res = run_models(
-                    df_csv=csv_bytes,
-                    min_obs=min_obs, min_cv=min_cv, min_r2=min_r2,
-                    max_beta=max_beta, pval_thresh=pval_thresh,
-                    run_rolling=run_rolling,
-                )
+                res = run_models(df_csv=csv_bytes, min_obs=min_obs, min_cv=min_cv,
+                                 min_r2=min_r2, max_beta=max_beta, pval_thresh=pval_thresh,
+                                 run_rolling=run_rolling)
                 st.session_state["results"] = res
                 st.success("✅ Análisis completado")
             except Exception as e:
-                st.error(f"Error al ejecutar el modelo: {e}")
-                st.exception(e)
+                st.error(f"Error: {e}"); st.exception(e)
 
     results = st.session_state["results"]
-
     if results is None:
-        st.info("Configura los parámetros y presiona **▶️ Ejecutar análisis** para ver los resultados.")
+        st.info("Configura los parámetros y presiona **▶️ Ejecutar análisis**.")
     else:
-        df_m1a = results["m1a"]
-        m2     = results["m2"]
+        df_m1a = results["m1a"]; m2 = results["m2"]
 
-        section("🔬 Validación global del modelo — ¿vale la pena el análisis?")
-        st.caption(
-            "El Modelo 2 usa todos los SKUs y tiendas con controles estadísticos avanzados. "
-            "Valida el análisis antes de ver resultados individuales por SKU."
-        )
-
+        section("🔬 Validación Global del modelo — ¿los datos tienen señal de elasticidad?")
+        st.caption("La Validación Global usa todos los SKUs con controles por tienda, mes y tipo de producto. "
+                   "Si pasa esta prueba, tiene sentido analizar producto por producto.")
         css, msg, reasons = traffic_light(m2["r2"], m2["beta"], m2["beta_pval"], m2["rmse"])
-        col_verd, col_metr = st.columns([1, 2])
-        with col_verd:
+        cv1, cv2 = st.columns([1,2])
+        with cv1:
             st.markdown(f'<div class="{css}">{msg}</div><br>', unsafe_allow_html=True)
-            for r in reasons:
-                st.caption(r)
-        with col_metr:
+            for r in reasons: st.caption(r)
+        with cv2:
             st.dataframe(pd.DataFrame({
-                "Métrica": ["N observaciones","R²","R² ajustado","Beta precio (M2)",
-                            "p-valor beta","Coef. premium","RMSE (log-escala)"],
-                "Valor":   [f'{m2["n_obs"]:,}', f'{m2["r2"]:.4f}', f'{m2["r2_adj"]:.4f}',
-                            f'{m2["beta"]:.4f}', f'{m2["beta_pval"]:.4f}',
-                            f'{m2["premium"]:.4f}', f'{m2["rmse"]:.4f}'],
-                "Interpretación": [
-                    "Transacciones usadas en la regresión global",
-                    "Proporción de varianza en ventas explicada por precio (0-1)",
-                    "R² penalizado por número de variables",
-                    f'Por cada +1% en precio → {m2["beta"]:.2f}% en unidades',
+                "Métrica":["N observaciones","R²","R² ajustado","Elasticidad precio global","p-valor",
+                           "Coef. premium","RMSE (escala log)"],
+                "Valor":[f'{m2["n_obs"]:,}',f'{m2["r2"]:.4f}',f'{m2["r2_adj"]:.4f}',
+                         f'{m2["beta"]:.4f}',f'{m2["beta_pval"]:.4f}',
+                         f'{m2["premium"]:.4f}',f'{m2["rmse"]:.4f}'],
+                "Interpretación":[
+                    "Transacciones usadas en el modelo global",
+                    "% de varianza en ventas explicada por precio (0-1). En retail 0.15+ es aceptable.",
+                    "R² penalizado por número de variables incluidas",
+                    f'+1% en precio → {m2["beta"]:.2f}% en unidades vendidas',
                     "Significativo si < 0.10",
-                    "Premium venden " + ("más" if m2["premium"] > 0 else "menos") + " que no-premium",
-                    "Error promedio en log-escala (menor = más preciso)",
-                ],
-            }), hide_index=True, use_container_width=True)
+                    "Premium venden " + ("más" if m2["premium"]>0 else "menos") + " que no-premium",
+                    "Error promedio en log-escala. < 0.5 es bueno.",
+                ]}), hide_index=True, use_container_width=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
-
-        n_valid = len(df_m1a[df_m1a["recomendacion"] != "No recomendable"]) if len(df_m1a) > 0 else 0
-        section(
-            f"📦 Resultados por SKU — {len(df_m1a):,} analizados de {results['n_total']:,} totales"
-            f" · {n_valid} con recomendación válida"
-        )
+        n_valid = len(df_m1a[df_m1a["recomendacion"]!="No recomendable"]) if len(df_m1a)>0 else 0
+        section(f"📦 Elasticidad Total por producto — {len(df_m1a):,} analizados de {results['n_total']:,} · {n_valid} con recomendación válida")
 
         if len(df_m1a) == 0:
-            st.warning("Ningún SKU pasó los filtros. Prueba reducir el mínimo de meses o el CV mínimo.")
+            st.warning("⚠️ Ningún SKU pasó los filtros. Prueba reduciendo el mínimo de meses a 3 o el CV a 0%.")
         else:
             rec_counts = df_m1a["recomendacion"].value_counts()
             c_rec = st.columns(4)
-            for i, (rec, color) in enumerate(REC_COLORS.items()):
-                cnt = rec_counts.get(rec, 0)
-                pct = cnt / len(df_m1a) * 100
+            for i,(rec,color) in enumerate(REC_COLORS.items()):
+                cnt = rec_counts.get(rec,0); pct = cnt/len(df_m1a)*100
                 c_rec[i].markdown(
                     f'<div class="rec-card" style="border-top:4px solid {color};">'
-                    f'<div style="font-size:32px; font-weight:900; color:{color};">{cnt}</div>'
-                    f'<div style="font-size:12px; font-weight:700; color:#333;">{rec.upper()}</div>'
-                    f'<div style="font-size:11px; color:#999;">{pct:.1f}% del total</div></div>',
-                    unsafe_allow_html=True,
-                )
+                    f'<div style="font-size:32px;font-weight:900;color:{color};">{cnt}</div>'
+                    f'<div style="font-size:12px;font-weight:700;color:#333;">{rec.upper()}</div>'
+                    f'<div style="font-size:11px;color:#999;">{pct:.1f}% del total</div></div>',
+                    unsafe_allow_html=True)
 
             st.markdown("<br>", unsafe_allow_html=True)
-
-            fc1, fc2, fc3 = st.columns(3)
+            fc1,fc2,fc3 = st.columns(3)
             with fc1:
                 depts = sorted(df_m1a["dept_nm"].dropna().unique().tolist())
-                dept_f = st.multiselect("Departamento", depts)
+                dept_f = st.multiselect("Filtrar departamento", depts, key="dept_f_cal")
             with fc2:
-                rec_f = st.multiselect("Recomendación", list(REC_COLORS.keys()))
+                rec_f = st.multiselect("Filtrar recomendación", list(REC_COLORS.keys()), key="rec_f_cal")
             with fc3:
-                srch = st.text_input("Buscar por nombre o SKU", placeholder="Ej: FOLDER, 50012983")
+                srch = st.text_input("Buscar nombre o SKU", placeholder="Ej: FOLDER, 50012983")
 
             show = df_m1a.copy()
             if dept_f: show = show[show["dept_nm"].isin(dept_f)]
             if rec_f:  show = show[show["recomendacion"].isin(rec_f)]
             if srch:
-                show = show[
-                    show["prod_nm"].str.contains(srch, case=False, na=False) |
-                    show["prod_nbr"].str.contains(srch, case=False, na=False)
-                ]
+                show = show[show["prod_nm"].str.contains(srch,case=False,na=False)|
+                            show["prod_nbr"].str.contains(srch,case=False,na=False)]
 
-            disp = ["prod_nbr","prod_nm","dept_nm","beta","r2","rmse","pval","n_meses","recomendacion"]
-            disp = [c for c in disp if c in show.columns]
-            st.dataframe(
-                show[disp].rename(columns={
-                    "prod_nbr":"SKU","prod_nm":"Producto","dept_nm":"Departamento",
-                    "beta":"Beta","r2":"R²","rmse":"RMSE","pval":"p-valor",
-                    "n_meses":"Meses","recomendacion":"Recomendación",
-                }).sort_values("Beta"),
-                hide_index=True, use_container_width=True, height=380,
-            )
+            disp = [c for c in ["prod_nbr","prod_nm","dept_nm","beta","r2","rmse","pval","n_meses","recomendacion"] if c in show.columns]
+            st.dataframe(show[disp].rename(columns={
+                "prod_nbr":"SKU","prod_nm":"Producto","dept_nm":"Departamento",
+                "beta":"Beta","r2":"R²","rmse":"RMSE","pval":"p-valor",
+                "n_meses":"Meses","recomendacion":"Recomendación"}).sort_values("Beta"),
+                hide_index=True, use_container_width=True, height=380)
 
             st.markdown("<br>", unsafe_allow_html=True)
-            dl1, dl2 = st.columns(2)
+            dl1,dl2 = st.columns(2)
             with dl1:
-                st.download_button(
-                    "⬇️ Descargar resultados por SKU (CSV)",
-                    df_m1a.to_csv(index=False).encode("utf-8"),
-                    "elasticidad_por_sku.csv", "text/csv",
-                )
+                st.download_button("⬇️ Descargar resultados por SKU (CSV)",
+                    df_m1a.to_csv(index=False).encode("utf-8"),"elasticidad_sku.csv","text/csv")
             with dl2:
-                if len(results["sim"]) > 0:
-                    st.download_button(
-                        "⬇️ Descargar simulación de precios (CSV)",
-                        results["sim"].to_csv(index=False).encode("utf-8"),
-                        "simulacion_precios.csv", "text/csv",
-                    )
+                if len(results["sim"])>0:
+                    st.download_button("⬇️ Descargar simulación de precios (CSV)",
+                        results["sim"].to_csv(index=False).encode("utf-8"),"simulacion_precios.csv","text/csv")
 
 
-# ────────────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — DASHBOARD DESCRIPTIVO
-# ────────────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
 with tab2:
     df = df_main.copy()
 
-    section("📊 Indicadores clave de desempeño")
-    total_rev   = df["venta_con_iva"].sum()
-    total_units = df["qty"].sum()
-    n_skus      = df["prod_nbr"].nunique()
-    n_stores    = df["store_nbr"].nunique()
-    n_months    = df["mes_str"].nunique()
-    avg_mg      = df["margen"].mean() * 100 if "margen" in df.columns else 0
+    # Filtros globales al inicio
+    section("🔍 Filtros")
+    ff1, ff2, ff3 = st.columns(3)
+    with ff1:
+        all_depts = sorted(df["dept_nm"].dropna().unique().tolist())
+        dept_sel = st.multiselect("Departamento", all_depts, key="desc_dept")
+    with ff2:
+        all_years = sorted(df["año"].dropna().unique().tolist())
+        year_sel = st.multiselect("Año", all_years, key="desc_year")
+    with ff3:
+        if "tipo_marca" in df.columns:
+            all_marcas = sorted(df["tipo_marca"].dropna().unique().tolist())
+            marca_sel = st.multiselect("Tipo de marca", all_marcas, key="desc_marca")
+        else:
+            marca_sel = []
 
+    if dept_sel:  df = df[df["dept_nm"].isin(dept_sel)]
+    if year_sel:  df = df[df["año"].isin(year_sel)]
+    if marca_sel: df = df[df["tipo_marca"].isin(marca_sel)]
+
+    if len(df) == 0:
+        st.warning("No hay datos con los filtros seleccionados.")
+        st.stop()
+
+    # KPIs
+    section("📊 Indicadores clave")
     kc = st.columns(5)
-    kpi(kc[0], "Venta total",       f"${total_rev/1e6:.1f}M",  OM_RED)
-    kpi(kc[1], "Unidades vendidas", f"{total_units/1e3:.0f}K", OM_BLUE)
-    kpi(kc[2], "SKUs únicos",       f"{n_skus:,}",             OM_GREEN)
-    kpi(kc[3], "Tiendas",           f"{n_stores}",             OM_AMBER)
-    kpi(kc[4], "Margen promedio",   f"{avg_mg:.1f}%",          "#7B1FA2")
-
+    kpi(kc[0],"Venta total",      f"${df['venta_con_iva'].sum()/1e6:.1f}M", OM_RED)
+    kpi(kc[1],"Unidades vendidas",f"{df['qty'].sum()/1e3:.0f}K",            OM_BLUE)
+    kpi(kc[2],"SKUs únicos",      f"{df['prod_nbr'].nunique():,}",           OM_GREEN)
+    kpi(kc[3],"Tiendas",          f"{df['store_nbr'].nunique()}",            OM_AMBER)
+    kpi(kc[4],"Margen promedio",  f"{df['margen'].mean()*100:.1f}%",         "#7B1FA2")
     st.markdown("<br>", unsafe_allow_html=True)
 
     # Time series
     section("📅 Evolución mensual de ventas")
-    ts = (df.groupby("mes_str")
-          .agg(venta=("venta_con_iva","sum"), unidades=("qty","sum"))
+    ts = (df.groupby("mes_str").agg(venta=("venta_con_iva","sum"),unidades=("qty","sum"))
           .reset_index().sort_values("mes_str"))
-
-    tc1, tc2 = st.columns(2)
+    tc1,tc2 = st.columns(2)
     with tc1:
         fig = px.area(ts, x="mes_str", y="venta", title="Venta mensual total ($)",
-                      labels={"mes_str":"Mes","venta":"Ventas ($)"},
-                      color_discrete_sequence=[OM_RED])
+                      labels={"mes_str":"Mes","venta":"Ventas ($)"}, color_discrete_sequence=[OM_RED])
         fig.update_xaxes(tickangle=45)
         st.plotly_chart(_layout(fig), use_container_width=True)
     with tc2:
         fig = px.bar(ts, x="mes_str", y="unidades", title="Unidades vendidas por mes",
-                     labels={"mes_str":"Mes","unidades":"Unidades"},
-                     color_discrete_sequence=[OM_BLUE])
+                     labels={"mes_str":"Mes","unidades":"Unidades"}, color_discrete_sequence=[OM_BLUE])
         fig.update_xaxes(tickangle=45)
         st.plotly_chart(_layout(fig), use_container_width=True)
 
     # Department
     section("🏷️ Ventas por departamento")
-    dept = (df.groupby("dept_nm")
-            .agg(venta=("venta_con_iva","sum"), n_skus=("prod_nbr","nunique"),
-                 margen=("margen","mean"))
-            .reset_index().sort_values("venta", ascending=False))
+    dept = (df.groupby("dept_nm").agg(venta=("venta_con_iva","sum"),n_skus=("prod_nbr","nunique"))
+            .reset_index().sort_values("venta",ascending=False))
     dept["dept_short"] = dept["dept_nm"].str[:28]
-
-    dc1, dc2 = st.columns([3, 2])
+    dc1,dc2 = st.columns([3,2])
     with dc1:
         fig = px.bar(dept, x="venta", y="dept_short", orientation="h",
                      title="Venta total por departamento",
-                     labels={"venta":"Ventas ($)","dept_short":""},
+                     labels={"venta":"Ventas ($)","dept_short":"Departamento"},
                      color="venta", color_continuous_scale=[[0,"#FFCDD2"],[1,OM_RED]])
-        fig.update_layout(coloraxis_showscale=False, yaxis=dict(autorange="reversed"))
+        fig.update_layout(coloraxis_showscale=False, yaxis=dict(autorange="reversed"),
+                          showlegend=False)
+        fig.update_traces(hovertemplate="<b>%{y}</b><br>Ventas: $%{x:,.0f}<extra></extra>")
         st.plotly_chart(_layout(fig, h=380), use_container_width=True)
     with dc2:
-        fig = px.pie(dept.head(8), values="venta", names="dept_short",
-                     title="Participación (top 8)",
+        top8 = dept.head(8)
+        fig = px.pie(top8, values="venta", names="dept_short", title="Participación (top 8)",
                      color_discrete_sequence=px.colors.qualitative.Set2)
-        fig.update_traces(textposition="inside", textinfo="percent+label", textfont_size=10)
-        fig.update_layout(showlegend=False, height=380, paper_bgcolor="white",
+        fig.update_traces(textposition="inside", textinfo="percent", textfont_size=11,
+                          hovertemplate="<b>%{label}</b><br>%{percent}<extra></extra>")
+        fig.update_layout(showlegend=True, height=380, paper_bgcolor="white",
                           margin=dict(t=45,b=20,l=20,r=20))
         st.plotly_chart(fig, use_container_width=True)
 
     # Store performance
     section("🏪 Desempeño por tienda (Top 20)")
     stores = (df.groupby(["store_nbr","store_nm"])
-              .agg(venta=("venta_con_iva","sum"), margen=("margen","mean"),
-                   unidades=("qty","sum"))
-              .reset_index().sort_values("venta", ascending=False).head(20))
-    stores["label"] = stores["store_nbr"] + " " + stores["store_nm"].str.strip().str[:15]
-    stores["margen_pct"] = stores["margen"] * 100
-
-    sc1, sc2 = st.columns(2)
+              .agg(venta=("venta_con_iva","sum"),margen=("margen","mean"),unidades=("qty","sum"))
+              .reset_index().sort_values("venta",ascending=False).head(20))
+    stores["label"] = stores["store_nbr"]+" "+stores["store_nm"].str.strip().str[:12]
+    stores["margen_pct"] = stores["margen"]*100
+    sc1,sc2 = st.columns(2)
     with sc1:
-        fig = px.bar(stores, x="label", y="venta", title="Top 20 tiendas por ventas",
-                     labels={"label":"","venta":"Ventas ($)"},
-                     color="margen_pct",
-                     color_continuous_scale=[[0,OM_RED],[0.5,OM_AMBER],[1,OM_GREEN]])
-        fig.update_xaxes(tickangle=55, tickfont=dict(size=9))
-        fig.update_layout(coloraxis_colorbar=dict(title="Margen %"))
-        st.plotly_chart(_layout(fig, h=380), use_container_width=True)
+        fig = go.Figure(go.Bar(
+            x=stores["label"], y=stores["venta"],
+            marker=dict(color=stores["margen_pct"],
+                        colorscale=[[0,OM_RED],[0.5,OM_AMBER],[1,OM_GREEN]],
+                        colorbar=dict(title="Margen %")),
+            hovertemplate="<b>%{x}</b><br>Ventas: $%{y:,.0f}<br>Margen: %{marker.color:.1f}%<extra></extra>"))
+        fig.update_layout(title="Top 20 tiendas por ventas (color = margen)",
+                          xaxis=dict(tickangle=55, tickfont=dict(size=9)),
+                          plot_bgcolor="white", paper_bgcolor="white",
+                          height=380, margin=dict(t=45,b=80,l=20,r=20))
+        st.plotly_chart(fig, use_container_width=True)
     with sc2:
         fig = px.scatter(stores, x="venta", y="margen_pct", size="unidades",
-                         text="store_nbr", title="Ventas vs Margen por tienda",
-                         labels={"venta":"Ventas ($)","margen_pct":"Margen (%)"},
+                         text="store_nbr", title="Ventas vs Margen",
+                         labels={"venta":"Ventas ($)","margen_pct":"Margen (%)","store_nbr":"Tienda"},
                          color="margen_pct",
                          color_continuous_scale=[[0,OM_RED],[0.5,OM_AMBER],[1,OM_GREEN]])
-        fig.update_traces(textposition="top center", textfont_size=8)
+        fig.update_traces(textposition="top center", textfont_size=8,
+                          hovertemplate="<b>%{text}</b><br>Ventas: $%{x:,.0f}<br>Margen: %{y:.1f}%<extra></extra>")
         fig.update_layout(coloraxis_showscale=False)
         st.plotly_chart(_layout(fig, h=380), use_container_width=True)
 
     # Top SKUs
     section("🏆 Top 15 productos")
     top_sku = (df.groupby(["prod_nbr","prod_nm"])
-               .agg(venta=("venta_con_iva","sum"), unidades=("qty","sum"),
-                    precio_prom=("precio_tx","mean"), margen=("margen","mean"))
-               .reset_index().sort_values("venta", ascending=False).head(15))
-    top_sku["label"] = top_sku["prod_nbr"] + " " + top_sku["prod_nm"].str[:22]
-
-    sk1, sk2 = st.columns(2)
+               .agg(venta=("venta_con_iva","sum"),unidades=("qty","sum"),
+                    precio_prom=("precio_tx","mean"),margen=("margen","mean"))
+               .reset_index().sort_values("venta",ascending=False).head(15))
+    top_sku["label"] = top_sku["prod_nbr"]+" "+top_sku["prod_nm"].str[:20]
+    sk1,sk2 = st.columns(2)
     with sk1:
-        fig = px.bar(top_sku.sort_values("venta"), x="venta", y="label",
-                     orientation="h", title="Por venta total ($)",
+        fig = px.bar(top_sku.sort_values("venta"), x="venta", y="label", orientation="h",
+                     title="Por venta total ($)",
                      labels={"venta":"Ventas ($)","label":""},
                      color_discrete_sequence=[OM_RED])
+        fig.update_traces(hovertemplate="<b>%{y}</b><br>Ventas: $%{x:,.0f}<extra></extra>")
         fig.update_yaxes(tickfont=dict(size=9))
-        st.plotly_chart(_layout(fig, h=440), use_container_width=True)
+        st.plotly_chart(_layout(fig,h=440), use_container_width=True)
     with sk2:
-        fig = px.bar(top_sku.sort_values("unidades"), x="unidades", y="label",
-                     orientation="h", title="Por unidades vendidas",
+        fig = px.bar(top_sku.sort_values("unidades"), x="unidades", y="label", orientation="h",
+                     title="Por unidades vendidas",
                      labels={"unidades":"Unidades","label":""},
                      color_discrete_sequence=[OM_BLUE])
+        fig.update_traces(hovertemplate="<b>%{y}</b><br>Unidades: %{x:,.0f}<extra></extra>")
         fig.update_yaxes(tickfont=dict(size=9))
-        st.plotly_chart(_layout(fig, h=440), use_container_width=True)
+        st.plotly_chart(_layout(fig,h=440), use_container_width=True)
 
     # Distributions
     section("📊 Distribuciones de precio, margen y unidades")
-    p95_p = df["precio_tx"].quantile(0.95)
-    p95_q = df["qty"].quantile(0.95)
-    dc1, dc2, dc3 = st.columns(3)
+    p95_p = df["precio_tx"].quantile(0.95); p95_q = df["qty"].quantile(0.95)
+    dc1,dc2,dc3 = st.columns(3)
     with dc1:
-        fig = px.histogram(df[df["precio_tx"] <= p95_p], x="precio_tx", nbins=50,
+        fig = px.histogram(df[df["precio_tx"]<=p95_p], x="precio_tx", nbins=50,
                            title="Distribución de precios",
                            labels={"precio_tx":"Precio unitario ($)"},
                            color_discrete_sequence=[OM_RED])
-        fig.update_layout(showlegend=False)
-        st.plotly_chart(_layout(fig, h=280), use_container_width=True)
+        fig.update_layout(showlegend=False, bargap=0.05)
+        st.plotly_chart(_layout(fig,h=280), use_container_width=True)
     with dc2:
-        fig = px.histogram(df[df["margen"].between(-0.5, 1.0)], x="margen", nbins=40,
+        fig = px.histogram(df[df["margen"].between(-0.5,1.0)], x="margen", nbins=40,
                            title="Distribución de márgenes",
                            labels={"margen":"Margen (ratio)"},
                            color_discrete_sequence=[OM_GREEN])
-        fig.update_layout(showlegend=False)
-        st.plotly_chart(_layout(fig, h=280), use_container_width=True)
+        fig.update_layout(showlegend=False, bargap=0.05)
+        st.plotly_chart(_layout(fig,h=280), use_container_width=True)
     with dc3:
-        fig = px.histogram(df[df["qty"] <= p95_q], x="qty", nbins=40,
+        fig = px.histogram(df[df["qty"]<=p95_q], x="qty", nbins=40,
                            title="Unidades por transacción",
                            labels={"qty":"Unidades"},
                            color_discrete_sequence=[OM_AMBER])
-        fig.update_layout(showlegend=False)
-        st.plotly_chart(_layout(fig, h=280), use_container_width=True)
+        fig.update_layout(showlegend=False, bargap=0.05)
+        st.plotly_chart(_layout(fig,h=280), use_container_width=True)
 
-    # Premium vs Non-Premium
+    # Premium
     section("⭐ Premium vs No Premium")
     prem = (df.groupby("es_premium")
-            .agg(venta=("venta_con_iva","sum"), unidades=("qty","sum"),
-                 precio_prom=("precio_tx","mean"), margen_prom=("margen","mean"))
+            .agg(venta=("venta_con_iva","sum"),unidades=("qty","sum"),
+                 precio_prom=("precio_tx","mean"),margen_prom=("margen","mean"))
             .reset_index())
-    prem["tipo"] = prem["es_premium"].map({0:"No Premium", 1:"Premium"})
-    prem["margen_pct"] = prem["margen_prom"] * 100
-
-    pm1, pm2, pm3 = st.columns(3)
-    for col_w, metric, label in [
-        (pm1, "venta",      "Venta total ($)"),
-        (pm2, "precio_prom","Precio promedio ($)"),
-        (pm3, "margen_pct", "Margen promedio (%)"),
+    prem["tipo"] = prem["es_premium"].map({0:"No Premium",1:"Premium"})
+    prem["margen_pct"] = prem["margen_prom"]*100
+    pm1,pm2,pm3 = st.columns(3)
+    for col_w, metric, lbl, pfx in [
+        (pm1,"venta","Venta total ($)","$"),
+        (pm2,"precio_prom","Precio promedio ($)","$"),
+        (pm3,"margen_pct","Margen promedio (%)",""),
     ]:
-        fig = px.bar(prem, x="tipo", y=metric, title=label,
-                     color="tipo",
-                     color_discrete_map={"No Premium": OM_BLUE, "Premium": OM_RED},
-                     text_auto=".2s")
+        vals = prem[metric].tolist()
+        fig = px.bar(prem, x="tipo", y=metric, title=lbl,
+                     color="tipo", color_discrete_map={"No Premium":OM_BLUE,"Premium":OM_RED})
+        suf = "%" if pfx=="" else ""
+        fig.update_traces(
+            text=[f"{pfx}{v:,.1f}{suf}" for v in vals],
+            textposition="outside",
+            hovertemplate="<b>%{x}</b><br>"+lbl+": %{y:,.2f}<extra></extra>")
         fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="")
-        col_w.plotly_chart(_layout(fig, h=260), use_container_width=True)
+        col_w.plotly_chart(_layout(fig,h=260), use_container_width=True)
 
     # Brand type
     if "tipo_marca" in df.columns:
         section("🏷️ Marca Propia vs Marca Externa")
         marca = (df.groupby("tipo_marca")
-                 .agg(venta=("venta_con_iva","sum"), margen_prom=("margen","mean"))
+                 .agg(venta=("venta_con_iva","sum"),margen_prom=("margen","mean"))
                  .reset_index())
-        marca["margen_pct"] = marca["margen_prom"] * 100
-        mb1, mb2 = st.columns(2)
+        marca["margen_pct"] = marca["margen_prom"]*100
+        mb1,mb2 = st.columns(2)
         with mb1:
             fig = px.bar(marca, x="tipo_marca", y="venta", title="Venta por tipo de marca",
-                         color="tipo_marca", text_auto=".2s",
-                         color_discrete_sequence=[OM_RED, OM_BLUE, OM_GREEN])
+                         color="tipo_marca", color_discrete_sequence=[OM_RED,OM_BLUE,OM_GREEN])
+            fig.update_traces(text=[f"${v/1e3:,.0f}K" for v in marca["venta"]],
+                              textposition="outside",
+                              hovertemplate="<b>%{x}</b><br>Ventas: $%{y:,.0f}<extra></extra>")
             fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="Ventas ($)")
-            st.plotly_chart(_layout(fig, h=280), use_container_width=True)
+            st.plotly_chart(_layout(fig,h=280), use_container_width=True)
         with mb2:
             fig = px.bar(marca, x="tipo_marca", y="margen_pct", title="Margen por tipo de marca",
-                         color="tipo_marca", text_auto=".1f",
-                         color_discrete_sequence=[OM_GREEN, OM_AMBER, OM_BLUE])
+                         color="tipo_marca", color_discrete_sequence=[OM_GREEN,OM_AMBER,OM_BLUE])
+            fig.update_traces(text=[f"{v:.1f}%" for v in marca["margen_pct"]],
+                              textposition="outside",
+                              hovertemplate="<b>%{x}</b><br>Margen: %{y:.1f}%<extra></extra>")
             fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="Margen (%)")
-            st.plotly_chart(_layout(fig, h=280), use_container_width=True)
+            st.plotly_chart(_layout(fig,h=280), use_container_width=True)
 
-    # Seasonality
+    # Seasonality — ordered correctly
     section("📆 Estacionalidad — promedio por mes del año")
     seas = (df.groupby("mes_calendario")
-            .agg(venta_prom=("venta_con_iva","mean"), unidades_prom=("qty","mean"))
-            .reset_index())
+            .agg(venta_prom=("venta_con_iva","mean"),unidades_prom=("qty","mean"))
+            .reset_index().sort_values("mes_calendario"))
     seas["mes_nombre"] = seas["mes_calendario"].map(MONTH_NAMES)
-    se1, se2 = st.columns(2)
+    se1,se2 = st.columns(2)
     with se1:
-        fig = px.line(seas, x="mes_nombre", y="venta_prom",
-                      title="Venta promedio por mes del año",
+        fig = px.line(seas, x="mes_nombre", y="venta_prom", title="Venta promedio por mes del año",
                       labels={"mes_nombre":"","venta_prom":"Venta promedio ($)"},
-                      markers=True, color_discrete_sequence=[OM_RED])
+                      markers=True, color_discrete_sequence=[OM_RED],
+                      category_orders={"mes_nombre":MONTH_ORDER})
+        fig.update_traces(hovertemplate="<b>%{x}</b><br>Venta promedio: $%{y:,.0f}<extra></extra>")
         fig.update_layout(showlegend=False)
-        st.plotly_chart(_layout(fig, h=280), use_container_width=True)
+        st.plotly_chart(_layout(fig,h=280), use_container_width=True)
     with se2:
-        fig = px.bar(seas, x="mes_nombre", y="unidades_prom",
-                     title="Unidades promedio por mes del año",
+        fig = px.bar(seas, x="mes_nombre", y="unidades_prom", title="Unidades promedio por mes del año",
                      labels={"mes_nombre":"","unidades_prom":"Unidades promedio"},
-                     color_discrete_sequence=[OM_BLUE])
+                     color_discrete_sequence=[OM_BLUE],
+                     category_orders={"mes_nombre":MONTH_ORDER})
+        fig.update_traces(hovertemplate="<b>%{x}</b><br>Unidades promedio: %{y:,.1f}<extra></extra>")
         fig.update_layout(showlegend=False)
-        st.plotly_chart(_layout(fig, h=280), use_container_width=True)
+        st.plotly_chart(_layout(fig,h=280), use_container_width=True)
 
 
-# ────────────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — DASHBOARD PREDICTIVO
-# ────────────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
 with tab3:
     results = st.session_state["results"]
-
     if results is None:
-        st.info("⏳ Primero ejecuta el análisis en la pestaña **🧮 Calculadora** para ver este dashboard.")
+        st.info("⏳ Primero ejecuta el análisis en **🧮 Calculadora**.")
         st.stop()
 
-    df_m1a = results["m1a"]
-    df_m1b = results["m1b"]
-    df_m1c = results["m1c"]
-    df_sim  = results["sim"]
-    m2      = results["m2"]
+    df_m1a = results["m1a"]; df_m1b = results["m1b"]; df_m1c = results["m1c"]
+    df_sim = results["sim"]; m2 = results["m2"]; df_cal = results["cal"]
 
     if len(df_m1a) == 0:
-        st.warning("No hay SKUs con modelo válido. Ajusta los parámetros en la Calculadora.")
+        st.warning("No hay SKUs con modelo válido. Reduce el mínimo de meses o el CV en la Calculadora.")
         st.stop()
 
     rec_counts = df_m1a["recomendacion"].value_counts()
 
-    # Recommendation summary
+    # ── Narrativa ejecutiva ───────────────────────────────────────────────────
+    section("📝 Resumen ejecutivo — ¿qué hacer?")
+    narrative = generate_narrative(df_m1a, m2, df_cal)
+    st.markdown(f'<div class="narrative-box">{narrative.replace(chr(10), "<br>")}</div>',
+                unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Conteo por recomendación ──────────────────────────────────────────────
     section("🎯 Resumen de recomendaciones")
     rc = st.columns(4)
-    for i, (rec, color) in enumerate(REC_COLORS.items()):
-        cnt = rec_counts.get(rec, 0)
-        pct = cnt / len(df_m1a) * 100
+    for i,(rec,color) in enumerate(REC_COLORS.items()):
+        cnt = rec_counts.get(rec,0); pct = cnt/len(df_m1a)*100
         rc[i].markdown(
             f'<div class="rec-card" style="border-left:6px solid {color};">'
-            f'<div style="font-size:38px; font-weight:900; color:{color};">{cnt}</div>'
-            f'<div style="font-weight:700; font-size:12px; color:#333;">{rec.upper()}</div>'
-            f'<div style="font-size:11px; color:#999;">{pct:.1f}% del total</div></div>',
-            unsafe_allow_html=True,
-        )
+            f'<div style="font-size:38px;font-weight:900;color:{color};">{cnt}</div>'
+            f'<div style="font-weight:700;font-size:12px;color:#333;">{rec.upper()}</div>'
+            f'<div style="font-size:11px;color:#999;">{pct:.1f}% del total</div></div>',
+            unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Beta distribution + pie
-    bc1, bc2 = st.columns([3, 2])
-    with bc1:
-        fig = px.histogram(df_m1a, x="beta", nbins=40,
-                           color="recomendacion", color_discrete_map=REC_COLORS,
-                           title="Distribución de elasticidad (β) por SKU",
-                           labels={"beta":"Beta (elasticidad precio)"},
-                           barmode="overlay", opacity=0.75)
-        fig.add_vline(x=-1,   line_dash="dash",  line_color="gray", opacity=0.7,
-                      annotation_text="β=-1",   annotation_position="top right")
-        fig.add_vline(x=-1.5, line_dash="dot",   line_color="gray", opacity=0.5,
-                      annotation_text="β=-1.5", annotation_position="top left")
-        fig.add_vline(x=0,    line_color="black", line_width=0.5, opacity=0.4)
-        st.plotly_chart(_layout(fig, h=360), use_container_width=True)
-    with bc2:
-        fig = px.pie(values=rec_counts.values, names=rec_counts.index,
-                     title="SKUs por recomendación",
-                     color=rec_counts.index, color_discrete_map=REC_COLORS)
-        fig.update_traces(textposition="inside", textinfo="percent+label", textfont_size=11)
-        fig.update_layout(showlegend=False, height=360, paper_bgcolor="white",
-                          margin=dict(t=45,b=20,l=20,r=20))
-        st.plotly_chart(fig, use_container_width=True)
+    # ── Calendario mensual de acciones ────────────────────────────────────────
+    section("📅 ¿En qué meses actuar? — Calendario de acciones")
+    st.caption(
+        "Basado en patrones estacionales de demanda + elasticidad de cada producto. "
+        "**SUBIR** = mes de alta demanda en producto inelástico. "
+        "**PROMOVER** = mes ideal para descuentos o activaciones. "
+        "**MANTENER** = sin cambios recomendados.")
 
-    # Beta vs R² quality scatter
-    section("📐 Calidad del modelo por SKU")
-    st.caption("Cada burbuja = un SKU. Grande = más meses de datos. Ideal: beta negativa y R² alto.")
+    if len(df_cal) > 0:
+        # Filtro de departamento para el calendario
+        cal_depts = sorted(df_m1a["dept_nm"].dropna().unique().tolist())
+        cal_dept_sel = st.selectbox("Filtrar por departamento (calendario)", ["Todos"] + cal_depts, key="cal_dept")
 
-    valid = df_m1a[df_m1a["recomendacion"] != "No recomendable"]
-    if len(valid) > 0:
-        fig = px.scatter(valid, x="beta", y="r2", size="n_meses",
-                         color="recomendacion", color_discrete_map=REC_COLORS,
-                         hover_data=["prod_nm","pval","rmse"],
-                         title="Beta vs R² — SKUs con recomendación válida",
-                         labels={"beta":"Beta","r2":"R²","n_meses":"Meses"}, size_max=30)
-        fig.add_vline(x=-1,   line_dash="dash", line_color="gray", opacity=0.4)
-        fig.add_vline(x=-1.5, line_dash="dot",  line_color="gray", opacity=0.35)
-        fig.add_hline(y=0.3,  line_dash="dash", line_color=OM_AMBER, opacity=0.5,
-                      annotation_text="R²=0.3 (umbral recomendado)")
-        st.plotly_chart(_layout(fig, h=400), use_container_width=True)
+        # Aggregate: heatmap general (cuántos SKUs por mes x acción)
+        cal_agg = (df_cal.groupby(["mes_cal","mes_nombre","accion"])
+                   .agg(n_skus=("prod_nbr","nunique")).reset_index())
 
-    # Price simulator
-    section("💹 Simulador de precios por SKU")
-    st.caption("Selecciona un producto y ve cómo cambian sus ingresos y margen con distintos precios.")
+        if cal_dept_sel != "Todos":
+            skus_dept = df_m1a[df_m1a["dept_nm"]==cal_dept_sel]["prod_nbr"].tolist()
+            cal_dept_df = df_cal[df_cal["prod_nbr"].isin(skus_dept)]
+            cal_agg = (cal_dept_df.groupby(["mes_cal","mes_nombre","accion"])
+                       .agg(n_skus=("prod_nbr","nunique")).reset_index())
 
-    valid_skus = df_m1a[df_m1a["recomendacion"] != "No recomendable"]["prod_nm"].tolist()
-    if valid_skus:
-        sel_nm  = st.selectbox("Producto a simular", sorted(valid_skus))
-        sku_row = df_m1a[df_m1a["prod_nm"] == sel_nm].iloc[0]
-        sku_sim = df_sim[df_sim["prod_nm"] == sel_nm]
+        # Bar chart: mes x acción
+        accion_colors = {"SUBIR":OM_BLUE,"PROMOVER":OM_GREEN,"MANTENER":OM_AMBER}
+        fig = px.bar(
+            cal_agg.sort_values("mes_cal"), x="mes_nombre", y="n_skus",
+            color="accion", barmode="group",
+            title="Número de SKUs por acción recomendada según el mes",
+            labels={"mes_nombre":"Mes","n_skus":"Número de SKUs","accion":"Acción"},
+            color_discrete_map=accion_colors,
+            category_orders={"mes_nombre":MONTH_ORDER,
+                             "accion":["SUBIR","PROMOVER","MANTENER"]},
+        )
+        fig.update_traces(hovertemplate="<b>%{x}</b><br>Acción: %{fullData.name}<br>SKUs: %{y}<extra></extra>")
+        st.plotly_chart(_layout(fig, h=340), use_container_width=True)
+
+        # Heatmap por SKU (top 20 por volumen)
+        if len(df_cal["prod_nbr"].unique()) > 1:
+            st.caption("Heatmap por producto: qué hacer cada mes. Selecciona departamento arriba para filtrar.")
+            top_skus_cal = (df_m1a[df_m1a["recomendacion"]!="No recomendable"]
+                            .sort_values("n_meses", ascending=False)["prod_nbr"].head(20).tolist())
+            if cal_dept_sel != "Todos":
+                top_skus_cal = [s for s in top_skus_cal if s in skus_dept][:20]
+
+            heat_data = df_cal[df_cal["prod_nbr"].isin(top_skus_cal)].copy()
+            if len(heat_data) > 0:
+                accion_num = {"SUBIR":2,"PROMOVER":1,"MANTENER":0}
+                accion_txt = {"SUBIR":"S","PROMOVER":"P","MANTENER":"M"}
+                pivot = (heat_data.pivot_table(index="prod_nm", columns="mes_cal",
+                                               values="accion", aggfunc="first")
+                         .reindex(columns=range(1,13)))
+                pivot_num = pivot.map(lambda x: accion_num.get(x, -1) if pd.notna(x) else -1)
+
+                fig_heat = go.Figure(data=go.Heatmap(
+                    z=pivot_num.values,
+                    x=[MONTH_NAMES[i] for i in range(1,13)],
+                    y=[nm[:35] for nm in pivot_num.index],
+                    colorscale=[[0,"#F5F5F5"],[0.01,"#F5F5F5"],[0.34,OM_AMBER],[0.67,OM_GREEN],[1.0,OM_BLUE]],
+                    zmin=-1, zmax=2, showscale=False,
+                    text=[[accion_txt.get(pivot.iloc[i,j], "") if pd.notna(pivot.iloc[i,j]) else ""
+                           for j in range(12)] for i in range(len(pivot))],
+                    texttemplate="%{text}", textfont=dict(size=11, color="white"),
+                    hovertemplate="<b>%{y}</b><br>Mes: %{x}<br>Acción: %{text}<extra></extra>",
+                ))
+                fig_heat.update_layout(
+                    title="S = Subir precio · P = Promover · M = Mantener",
+                    height=max(280, len(pivot)*28+60),
+                    margin=dict(t=45,b=20,l=20,r=20),
+                    paper_bgcolor="white", plot_bgcolor="white",
+                    xaxis=dict(side="top"), yaxis=dict(tickfont=dict(size=10)),
+                )
+                from plotly.graph_objects import layout as go_layout
+                from plotly.colors import unconvert_from_RGB_255
+                # Add legend manually
+                st.plotly_chart(fig_heat, use_container_width=True)
+                st.markdown(
+                    '<span class="action-badge-subir">S = SUBIR PRECIO</span>&nbsp;&nbsp;'
+                    '<span class="action-badge-promover">P = PROMOVER</span>&nbsp;&nbsp;'
+                    '<span class="action-badge-mantener">M = MANTENER</span>',
+                    unsafe_allow_html=True)
+    else:
+        st.info("No hay datos suficientes para el calendario. Asegúrate de que los SKUs tienen al menos 3 meses de datos.")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Simulador de precios ──────────────────────────────────────────────────
+    section("💹 Simulador de precios — ¿cuánto gano si cambio el precio?")
+    st.caption("Selecciona un producto y ve exactamente cuánto cambian los ingresos y el margen.")
+
+    # Filtro por departamento para el simulador
+    sim_depts = ["Todos"] + sorted(df_m1a["dept_nm"].dropna().unique().tolist())
+    sd1, sd2 = st.columns([1,3])
+    with sd1:
+        sim_dept = st.selectbox("Departamento", sim_depts, key="sim_dept")
+    valid_pool = df_m1a[df_m1a["recomendacion"]!="No recomendable"]
+    if sim_dept != "Todos":
+        valid_pool = valid_pool[valid_pool["dept_nm"]==sim_dept]
+
+    if len(valid_pool) == 0:
+        st.info("Sin productos válidos en este departamento.")
+    else:
+        with sd2:
+            sel_nm = st.selectbox("Producto a simular", sorted(valid_pool["prod_nm"].tolist()), key="sim_sku")
+
+        sku_row = df_m1a[df_m1a["prod_nm"]==sel_nm].iloc[0]
+        sku_sim = df_sim[df_sim["prod_nm"]==sel_nm]
 
         if len(sku_sim) > 0:
-            beta_v = sku_row["beta"]
-            r2_v   = sku_row["r2"]
-            pval_v = sku_row["pval"]
-            n_v    = sku_row["n_meses"]
-            rec_c  = REC_COLORS.get(sku_row["recomendacion"], OM_LGRAY)
+            beta_v = sku_row["beta"]; r2_v = sku_row["r2"]; pval_v = sku_row["pval"]; n_v = sku_row["n_meses"]
+            rec_c = REC_COLORS.get(sku_row["recomendacion"], OM_LGRAY)
 
-            inf_col, chart_col = st.columns([1, 2])
+            inf_col, chart_col = st.columns([1,2])
             with inf_col:
                 st.markdown(
-                    f'<div style="background:white;border-radius:12px;padding:20px;'
-                    f'border-left:5px solid {rec_c};">'
-                    f'<div style="font-weight:700;font-size:14px;margin-bottom:12px;">{sel_nm[:55]}</div>'
+                    f'<div style="background:white;border-radius:12px;padding:20px;border-left:5px solid {rec_c};">'
+                    f'<div style="font-weight:700;font-size:14px;margin-bottom:12px;">{sel_nm[:50]}</div>'
                     f'<div style="font-size:13px;color:#555;line-height:2.2;">'
-                    f'β: <strong>{beta_v:.4f}</strong><br>'
-                    f'R²: <strong>{r2_v:.4f}</strong><br>'
-                    f'p-valor: <strong>{pval_v:.4f}</strong><br>'
-                    f'Meses: <strong>{n_v}</strong></div>'
-                    f'<div style="background:{rec_c};color:white;padding:8px 14px;'
-                    f'border-radius:20px;font-weight:700;text-align:center;'
-                    f'font-size:12px;margin-top:14px;">{sku_row["recomendacion"].upper()}</div></div>',
-                    unsafe_allow_html=True,
-                )
-                base_r = sku_sim[sku_sim["cambio"] == "Base 0%"]
-                if len(base_r) > 0:
+                    f'Elasticidad (β): <strong>{beta_v:.4f}</strong><br>'
+                    f'Ajuste del modelo (R²): <strong>{r2_v:.4f}</strong><br>'
+                    f'Significancia (p): <strong>{pval_v:.4f}</strong><br>'
+                    f'Meses de datos: <strong>{n_v}</strong></div>'
+                    f'<div style="background:{rec_c};color:white;padding:8px 14px;border-radius:20px;'
+                    f'font-weight:700;text-align:center;font-size:12px;margin-top:14px;">'
+                    f'{sku_row["recomendacion"].upper()}</div></div>', unsafe_allow_html=True)
+
+                base_r = sku_sim[sku_sim["cambio"]=="Base 0%"]
+                if len(base_r)>0:
                     br = base_r.iloc[0]
                     st.markdown(
-                        f'<div style="background:#F5F5F5;border-radius:8px;padding:14px;'
-                        f'font-size:13px;margin-top:10px;">'
-                        f'<strong>Precio base:</strong> ${br["precio_nuevo"]:,.2f}<br>'
+                        f'<div style="background:#F5F5F5;border-radius:8px;padding:14px;font-size:13px;margin-top:10px;">'
+                        f'<strong>Precio actual:</strong> ${br["precio_nuevo"]:,.2f}<br>'
                         f'<strong>Unidades/mes:</strong> {br["unidades_est"]:,.1f}<br>'
-                        f'<strong>Ingreso est.:</strong> ${br["ingreso_est"]:,.0f}<br>'
-                        f'<strong>Margen est.:</strong> ${br["margen_est"]:,.0f}</div>',
-                        unsafe_allow_html=True,
-                    )
+                        f'<strong>Ingreso estimado:</strong> ${br["ingreso_est"]:,.0f}<br>'
+                        f'<strong>Margen estimado:</strong> ${br["margen_est"]:,.0f}</div>',
+                        unsafe_allow_html=True)
 
             with chart_col:
                 colors_sc = ["#1565C0","#90CAF9","#9E9E9E","#EF9A9A","#C62828"]
@@ -1124,13 +1099,15 @@ with tab3:
                 fig.add_trace(go.Bar(x=sku_sim["cambio"], y=sku_sim["delta_ingreso_pct"],
                                      name="Δ Ingreso", marker_color=colors_sc,
                                      text=[f"{v:+.1f}%" for v in sku_sim["delta_ingreso_pct"]],
-                                     textposition="outside"))
+                                     textposition="outside",
+                                     hovertemplate="<b>%{x}</b><br>Δ Ingreso: %{y:+.1f}%<extra></extra>"))
                 fig.add_trace(go.Bar(x=sku_sim["cambio"], y=sku_sim["delta_margen_pct"],
                                      name="Δ Margen", marker_color=colors_sc, opacity=0.5,
                                      text=[f"{v:+.1f}%" for v in sku_sim["delta_margen_pct"]],
-                                     textposition="outside"))
+                                     textposition="outside",
+                                     hovertemplate="<b>%{x}</b><br>Δ Margen: %{y:+.1f}%<extra></extra>"))
                 fig.add_hline(y=0, line_color="black", line_width=0.8)
-                fig.update_layout(title="Cambio en Ingreso y Margen por escenario",
+                fig.update_layout(title="Cambio en Ingreso y Margen por escenario de precio",
                                   barmode="group", plot_bgcolor="white", paper_bgcolor="white",
                                   height=360, margin=dict(t=50,b=20,l=20,r=20),
                                   xaxis_title="Escenario de precio", yaxis_title="Cambio (%)",
@@ -1138,121 +1115,112 @@ with tab3:
                 st.plotly_chart(fig, use_container_width=True)
 
             # Continuous curve
-            base_r2 = sku_sim[sku_sim["cambio"] == "Base 0%"]
-            if len(base_r2) > 0:
-                br   = base_r2.iloc[0]
-                p0   = br["precio_nuevo"]
-                u0   = br["unidades_est"]
-                m0   = br["margen_est"]
-                rev0 = br["ingreso_est"]
-                c0   = p0 - (m0 / u0 if u0 else 0)
-                marg0_base = (p0 - c0) * u0 or 1
-
-                rng = np.linspace(-0.20, 0.20, 200)
-                pct_rev  = [(p0*(1+r)*u0*((1+r)**beta_v) - rev0)/rev0*100         for r in rng]
-                pct_marg = [((p0*(1+r)-c0)*u0*((1+r)**beta_v) - marg0_base)/marg0_base*100 for r in rng]
-
-                fig2 = go.Figure()
-                fig2.add_trace(go.Scatter(x=rng*100, y=pct_rev, name="Δ Ingreso",
-                                          line=dict(color=OM_RED, width=2.5)))
-                fig2.add_trace(go.Scatter(x=rng*100, y=pct_marg, name="Δ Margen",
-                                          line=dict(color=OM_BLUE, width=2, dash="dash")))
-                fig2.add_hline(y=0, line_color="gray", line_width=0.7)
-                fig2.add_vline(x=0, line_color="gray", line_width=0.7)
-                fig2.update_layout(title="Curva continua de sensibilidad precio ±20%",
-                                   plot_bgcolor="white", paper_bgcolor="white",
-                                   height=300, margin=dict(t=50,b=20,l=20,r=20),
-                                   xaxis_title="Cambio en precio (%)", yaxis_title="Cambio (%)",
-                                   legend=dict(orientation="h", y=1.1))
+            base_r2 = sku_sim[sku_sim["cambio"]=="Base 0%"]
+            if len(base_r2)>0:
+                br=base_r2.iloc[0]; p0=br["precio_nuevo"]; u0=br["unidades_est"]
+                m0=br["margen_est"]; rev0=br["ingreso_est"]
+                c0 = p0 - (m0/u0 if u0 else 0); marg0_base=(p0-c0)*u0 or 1
+                rng=np.linspace(-0.20,0.20,200)
+                pct_rev  = [(p0*(1+r)*u0*((1+r)**beta_v)-rev0)/rev0*100 for r in rng]
+                pct_marg = [((p0*(1+r)-c0)*u0*((1+r)**beta_v)-marg0_base)/marg0_base*100 for r in rng]
+                fig2=go.Figure()
+                fig2.add_trace(go.Scatter(x=rng*100,y=pct_rev,name="Δ Ingreso",
+                                          line=dict(color=OM_RED,width=2.5)))
+                fig2.add_trace(go.Scatter(x=rng*100,y=pct_marg,name="Δ Margen",
+                                          line=dict(color=OM_BLUE,width=2,dash="dash")))
+                fig2.add_hline(y=0,line_color="gray",line_width=0.7)
+                fig2.add_vline(x=0,line_color="gray",line_width=0.7)
+                fig2.update_layout(title="Curva de sensibilidad continua (±20% en precio)",
+                                   plot_bgcolor="white",paper_bgcolor="white",
+                                   height=300,margin=dict(t=50,b=20,l=20,r=20),
+                                   xaxis_title="Cambio en precio (%)",yaxis_title="Cambio en resultado (%)",
+                                   legend=dict(orientation="h",y=1.1))
                 st.plotly_chart(fig2, use_container_width=True)
 
-    # Rolling beta
-    has_rolling = len(df_m1b) > 0 or len(df_m1c) > 0
-    if has_rolling:
-        section("📉 Evolución temporal de la elasticidad (rolling)")
-        st.caption(
-            "Muestra cómo cambia la beta de un SKU en el tiempo. "
-            "Beta más cercana a 0 → menos sensible → buen momento para subir precio. "
-            "Beta muy negativa → muy sensible → buen momento para promover."
-        )
-        roll_pool = set()
-        if len(df_m1b) > 0: roll_pool |= set(df_m1b["prod_nm"].unique())
-        if len(df_m1c) > 0: roll_pool |= set(df_m1c["prod_nm"].unique())
+    # ── Beta distribution ─────────────────────────────────────────────────────
+    section("📊 Distribución de elasticidad — vista general")
+    bc1,bc2 = st.columns([3,2])
+    with bc1:
+        fig=px.histogram(df_m1a,x="beta",nbins=40,color="recomendacion",
+                         color_discrete_map=REC_COLORS,
+                         title="Distribución de beta por SKU",
+                         labels={"beta":"Beta (elasticidad precio)"},
+                         barmode="overlay",opacity=0.75)
+        fig.add_vline(x=-1,line_dash="dash",line_color="gray",opacity=0.7,
+                      annotation_text="β=-1",annotation_position="top right")
+        fig.add_vline(x=-1.5,line_dash="dot",line_color="gray",opacity=0.5,
+                      annotation_text="β=-1.5",annotation_position="top left")
+        fig.add_vline(x=0,line_color="black",line_width=0.5,opacity=0.4)
+        st.plotly_chart(_layout(fig,h=340), use_container_width=True)
+    with bc2:
+        fig=px.pie(values=rec_counts.values,names=rec_counts.index,
+                   title="SKUs por recomendación",
+                   color=rec_counts.index,color_discrete_map=REC_COLORS)
+        fig.update_traces(textposition="inside",textinfo="percent+label",textfont_size=11,
+                          hovertemplate="<b>%{label}</b><br>%{value} SKUs (%{percent})<extra></extra>")
+        fig.update_layout(showlegend=False,height=340,paper_bgcolor="white",
+                          margin=dict(t=45,b=20,l=20,r=20))
+        st.plotly_chart(fig, use_container_width=True)
 
-        roll_sel = st.selectbox("Producto (rolling)", sorted(roll_pool))
-        fig3 = go.Figure()
-        if len(df_m1b) > 0:
-            d3 = df_m1b[df_m1b["prod_nm"] == roll_sel].sort_values("mes_fin_dt")
-            if len(d3) > 0:
-                fig3.add_trace(go.Scatter(x=d3["mes_fin_dt"], y=d3["beta"],
-                                          mode="lines+markers", name="Trimestral (3 meses)",
-                                          line=dict(color=OM_BLUE, width=2.2), marker=dict(size=6)))
-        if len(df_m1c) > 0:
-            d6 = df_m1c[df_m1c["prod_nm"] == roll_sel].sort_values("mes_fin_dt")
-            if len(d6) > 0:
-                fig3.add_trace(go.Scatter(x=d6["mes_fin_dt"], y=d6["beta"],
-                                          mode="lines+markers", name="Semestral (6 meses)",
-                                          line=dict(color=OM_RED, width=2.2),
-                                          marker=dict(size=6, symbol="square")))
-        b_glob = df_m1a.loc[df_m1a["prod_nm"] == roll_sel, "beta"]
-        if len(b_glob) > 0:
-            fig3.add_hline(y=b_glob.iloc[0], line_dash="dot", line_color=OM_GREEN,
+    # ── Rolling beta ──────────────────────────────────────────────────────────
+    has_rolling = len(df_m1b)>0 or len(df_m1c)>0
+    if has_rolling:
+        section("📉 Tendencia de la elasticidad en el tiempo")
+        roll_pool = set()
+        if len(df_m1b)>0: roll_pool|=set(df_m1b["prod_nm"].unique())
+        if len(df_m1c)>0: roll_pool|=set(df_m1c["prod_nm"].unique())
+        roll_sel=st.selectbox("Producto",sorted(roll_pool),key="roll_sel")
+        fig3=go.Figure()
+        if len(df_m1b)>0:
+            d3=df_m1b[df_m1b["prod_nm"]==roll_sel].sort_values("mes_fin_dt")
+            if len(d3)>0:
+                fig3.add_trace(go.Scatter(x=d3["mes_fin_dt"],y=d3["beta"],
+                                          mode="lines+markers",name="Trimestral (3m)",
+                                          line=dict(color=OM_BLUE,width=2.2),marker=dict(size=6)))
+        if len(df_m1c)>0:
+            d6=df_m1c[df_m1c["prod_nm"]==roll_sel].sort_values("mes_fin_dt")
+            if len(d6)>0:
+                fig3.add_trace(go.Scatter(x=d6["mes_fin_dt"],y=d6["beta"],
+                                          mode="lines+markers",name="Semestral (6m)",
+                                          line=dict(color=OM_RED,width=2.2),marker=dict(size=6,symbol="square")))
+        b_glob=df_m1a.loc[df_m1a["prod_nm"]==roll_sel,"beta"]
+        if len(b_glob)>0:
+            fig3.add_hline(y=b_glob.iloc[0],line_dash="dot",line_color=OM_GREEN,
                            annotation_text=f"Beta global = {b_glob.iloc[0]:.2f}")
-        fig3.add_hline(y=-1,   line_dash="dash", line_color="gray", opacity=0.5,
-                       annotation_text="β=-1")
-        fig3.add_hline(y=-1.5, line_dash="dot",  line_color="gray", opacity=0.35,
-                       annotation_text="β=-1.5")
+        fig3.add_hline(y=-1,line_dash="dash",line_color="gray",opacity=0.5,annotation_text="β=-1")
+        fig3.add_hline(y=-1.5,line_dash="dot",line_color="gray",opacity=0.35,annotation_text="β=-1.5")
         fig3.update_layout(title=f"Elasticidad rolling — {roll_sel[:50]}",
-                           plot_bgcolor="white", paper_bgcolor="white",
-                           height=370, margin=dict(t=55,b=20,l=20,r=20),
-                           xaxis_title="Mes final de ventana", yaxis_title="Beta",
-                           legend=dict(orientation="h", y=1.1))
+                           plot_bgcolor="white",paper_bgcolor="white",
+                           height=360,margin=dict(t=55,b=20,l=20,r=20),
+                           xaxis_title="Mes",yaxis_title="Beta",
+                           legend=dict(orientation="h",y=1.1))
         st.plotly_chart(fig3, use_container_width=True)
 
-    # Top candidates table
-    section("📋 Candidatos por tipo de acción")
-    ct1, ct2 = st.columns(2)
+    # ── Candidate tables ──────────────────────────────────────────────────────
+    section("📋 Lista de candidatos por acción")
+    ct1,ct2 = st.columns(2)
     with ct1:
-        st.markdown("**🔵 Subir precio** — inelásticos (β entre -1 y 0, significativo)")
-        sub_up = df_m1a[df_m1a["recomendacion"] == "Subir precio"].sort_values("beta", ascending=False)
-        if len(sub_up) > 0:
-            st.dataframe(sub_up[["prod_nm","beta","r2","pval","n_meses"]]
-                         .rename(columns={"prod_nm":"Producto","beta":"Beta",
-                                           "r2":"R²","pval":"p-valor","n_meses":"Meses"})
-                         .head(12), hide_index=True, use_container_width=True, height=340)
-        else:
-            st.info("Sin candidatos con los parámetros actuales.")
+        st.markdown("**🔵 Subir precio** — beta entre 0 y -1 (inelásticos)")
+        sub_up=df_m1a[df_m1a["recomendacion"]=="Subir precio"].sort_values("beta",ascending=False)
+        if len(sub_up)>0:
+            st.dataframe(sub_up[["prod_nm","dept_nm","beta","r2","pval","n_meses"]]
+                         .rename(columns={"prod_nm":"Producto","dept_nm":"Depto",
+                                           "beta":"Beta","r2":"R²","pval":"p-valor","n_meses":"Meses"})
+                         .head(12),hide_index=True,use_container_width=True,height=320)
+        else: st.info("Sin candidatos con los parámetros actuales.")
     with ct2:
-        st.markdown("**🟢 Bajar / Promover** — elásticos (β < -1.5, significativo)")
-        sub_dn = df_m1a[df_m1a["recomendacion"] == "Bajar / Promover"].sort_values("beta")
-        if len(sub_dn) > 0:
-            st.dataframe(sub_dn[["prod_nm","beta","r2","pval","n_meses"]]
-                         .rename(columns={"prod_nm":"Producto","beta":"Beta",
-                                           "r2":"R²","pval":"p-valor","n_meses":"Meses"})
-                         .head(12), hide_index=True, use_container_width=True, height=340)
-        else:
-            st.info("Sin candidatos con los parámetros actuales.")
+        st.markdown("**🟢 Bajar / Promover** — beta < -1.5 (elásticos)")
+        sub_dn=df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"].sort_values("beta")
+        if len(sub_dn)>0:
+            st.dataframe(sub_dn[["prod_nm","dept_nm","beta","r2","pval","n_meses"]]
+                         .rename(columns={"prod_nm":"Producto","dept_nm":"Depto",
+                                           "beta":"Beta","r2":"R²","pval":"p-valor","n_meses":"Meses"})
+                         .head(12),hide_index=True,use_container_width=True,height=320)
+        else: st.info("Sin candidatos con los parámetros actuales.")
 
-    # Model stats summary
-    section("📊 Estadísticas del modelo M1A")
-    stat_cols = st.columns(3)
-    kpi(stat_cols[0], "Beta promedio (todos los SKUs)", f"{df_m1a['beta'].mean():.3f}", OM_BLUE)
-    kpi(stat_cols[1], "R² promedio",                   f"{df_m1a['r2'].mean():.3f}",   OM_GREEN)
-    kpi(stat_cols[2], "RMSE promedio (log-escala)",
-        f"{df_m1a['rmse'].mean():.3f}" if 'rmse' in df_m1a.columns else "N/A", OM_AMBER)
-
-    # Beta by department box
-    if "dept_nm" in df_m1a.columns:
-        valid_dept = df_m1a[df_m1a["recomendacion"] != "No recomendable"].dropna(subset=["dept_nm"])
-        if len(valid_dept) > 3:
-            st.markdown("<br>", unsafe_allow_html=True)
-            fig4 = px.box(valid_dept, x="dept_nm", y="beta",
-                          title="Distribución de Beta por departamento (SKUs válidos)",
-                          labels={"dept_nm":"Departamento","beta":"Beta"},
-                          color="dept_nm",
-                          color_discrete_sequence=px.colors.qualitative.Set2)
-            fig4.add_hline(y=-1,   line_dash="dash", line_color="gray", opacity=0.5)
-            fig4.add_hline(y=-1.5, line_dash="dot",  line_color="gray", opacity=0.35)
-            fig4.update_xaxes(tickangle=40, tickfont=dict(size=10))
-            fig4.update_layout(showlegend=False)
-            st.plotly_chart(_layout(fig4, h=380), use_container_width=True)
+    # ── KPIs del modelo ───────────────────────────────────────────────────────
+    section("📊 Métricas del análisis de Elasticidad Total")
+    sk1,sk2,sk3 = st.columns(3)
+    kpi(sk1,"Beta promedio",      f"{df_m1a['beta'].mean():.3f}", OM_BLUE)
+    kpi(sk2,"R² promedio",        f"{df_m1a['r2'].mean():.3f}",  OM_GREEN)
+    kpi(sk3,"RMSE promedio (log)",f"{df_m1a['rmse'].mean():.3f}" if 'rmse' in df_m1a.columns else "N/A", OM_AMBER)

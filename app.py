@@ -719,6 +719,37 @@ def run_ml_pipeline(df_csv: bytes, promo_bytes: bytes):
                 .sort_values("uplift",ascending=False).head(10))
     top_sens["dept"] = top_sens["prod_nbr"].map(dept_map)
 
+    # ── Heatmap timing: uplift promo por dept × mes y por SKU × mes ─────────
+    mensual["mes_nombre"] = mensual["mes_cal"].map(MONTH_NAMES)
+
+    # Base (sin promo) por dept × mes
+    base_dm = (mensual[mensual["tiene_promo"]==0]
+               .groupby(["dept_nm","mes_cal"])["unidades"].mean().rename("base"))
+    promo_dm = (mensual[mensual["tiene_promo"]==1]
+                .groupby(["dept_nm","mes_cal"])["unidades"].mean().rename("promo"))
+    dept_mes = (pd.concat([base_dm, promo_dm], axis=1).reset_index())
+    dept_mes["uplift_pct"] = ((dept_mes["promo"] - dept_mes["base"]) / dept_mes["base"] * 100).round(1)
+    dept_mes["mes_nombre"] = dept_mes["mes_cal"].map(MONTH_NAMES)
+
+    # Pivot para heatmap dept
+    dept_pivot = (dept_mes.pivot_table(index="dept_nm", columns="mes_cal",
+                                        values="uplift_pct", aggfunc="mean")
+                  .reindex(columns=range(1,13)))
+    dept_pivot.columns = [MONTH_NAMES[c] for c in dept_pivot.columns]
+
+    # SKU × mes (solo SKUs con >= 5 meses de observaciones en promo)
+    skus_con_promo = (mensual[mensual["tiene_promo"]==1]
+                      .groupby("prod_nbr")["mes_cal"].count())
+    skus_con_promo = skus_con_promo[skus_con_promo >= 3].index
+    base_sm = (mensual[(mensual["tiene_promo"]==0) & mensual["prod_nbr"].isin(skus_con_promo)]
+               .groupby(["prod_nbr","mes_cal"])["unidades"].mean().rename("base"))
+    promo_sm = (mensual[(mensual["tiene_promo"]==1) & mensual["prod_nbr"].isin(skus_con_promo)]
+                .groupby(["prod_nbr","mes_cal"])["unidades"].mean().rename("promo"))
+    sku_mes = pd.concat([base_sm, promo_sm], axis=1).reset_index()
+    sku_mes["uplift_pct"] = ((sku_mes["promo"] - sku_mes["base"]) / sku_mes["base"] * 100).round(1)
+    sku_mes["dept_nm"] = sku_mes["prod_nbr"].map(dept_map)
+    sku_mes["mes_nombre"] = sku_mes["mes_cal"].map(MONTH_NAMES)
+
     comp_out = {k:{kk:vv for kk,vv in v.items() if kk not in ("mod_u","mod_r")} for k,v in comparacion.items()}
     return {"ganador":ganador_nm,"comparacion":comp_out,"feat_df":feat_df,
             "r2_u":gan["r2_u"],"r2_r":gan["r2_r"],
@@ -732,7 +763,8 @@ def run_ml_pipeline(df_csv: bytes, promo_bytes: bytes):
             "n_skus":len(skus_ok),"promo_uplift":round(uplift,1),
             "promo_by_nivel":promo_by_nivel,
             "n_promo":int(mensual["tiene_promo"].sum()),"n_total":len(mensual),
-            "top_sens":top_sens}
+            "top_sens":top_sens,
+            "dept_pivot":dept_pivot,"sku_mes":sku_mes}
 
 
 tab1, tab2, tab3 = st.tabs(["🧮  Calculadora","📈  Dashboard Descriptivo","🎯  Dashboard Predictivo"])
@@ -1383,6 +1415,76 @@ with tab3:
             f'accionable — porque el precio es el driver dominante y OLS cuantifica exactamente '
             f'cuánto cambia la demanda por cada 1% de cambio en precio (elasticidad β por SKU).'
             f'</div>', unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Paso 1b: Timing óptimo de promociones ─────────────────────────────
+        if "dept_pivot" in ml_res and ml_res["dept_pivot"] is not None:
+            section("📅 Paso 1b — ¿Cuándo actuar? Timing óptimo por departamento y SKU")
+            st.caption("Uplift promedio de ventas en meses con promoción vs sin promoción. "
+                       "Verde = mes de alto impacto, rojo = promo no mueve mucho.")
+
+            dept_pivot = ml_res["dept_pivot"]
+            sku_mes    = ml_res["sku_mes"]
+
+            # ── Heatmap por departamento ───────────────────────────────────────
+            st.markdown("**Vista departamento — ¿qué depto responde más en cada mes?**")
+            fig_dh = go.Figure(data=go.Heatmap(
+                z=dept_pivot.values,
+                x=list(dept_pivot.columns),
+                y=[d[:30] for d in dept_pivot.index],
+                colorscale=[[0,"#EF5350"],[0.4,"#FFF9C4"],[1,"#43A047"]],
+                zmid=0,
+                text=[[f"{v:.0f}%" if not np.isnan(v) else "" for v in row]
+                      for row in dept_pivot.values],
+                texttemplate="%{text}", textfont=dict(size=10),
+                hovertemplate="<b>%{y}</b><br>%{x}: %{z:.1f}% uplift<extra></extra>",
+                colorbar=dict(title="Uplift %", thickness=14)))
+            fig_dh.update_layout(
+                height=max(300, len(dept_pivot)*32+80),
+                margin=dict(t=30,b=20,l=10,r=10),
+                paper_bgcolor="white", plot_bgcolor="white",
+                xaxis=dict(side="top"))
+            st.plotly_chart(fig_dh, use_container_width=True)
+
+            # ── Heatmap por SKU (filtrado por depto) ──────────────────────────
+            st.markdown("**Vista SKU — zoom por departamento**")
+            depts_con_data = sorted(sku_mes["dept_nm"].dropna().unique().tolist())
+            sel_dept_heat = st.selectbox("Departamento", depts_con_data, key="heat_dept_sel")
+
+            sku_dept = sku_mes[sku_mes["dept_nm"]==sel_dept_heat].copy()
+            if len(sku_dept) > 0:
+                # Pivot SKU × mes
+                sku_pivot = (sku_dept.pivot_table(index="prod_nbr", columns="mes_cal",
+                                                   values="uplift_pct", aggfunc="mean")
+                             .reindex(columns=range(1,13)))
+                sku_pivot.columns = [MONTH_NAMES[c] for c in sku_pivot.columns]
+                # Ordenar por uplift promedio descendente, top 20
+                sku_pivot["_avg"] = sku_pivot.mean(axis=1)
+                sku_pivot = sku_pivot.sort_values("_avg", ascending=False).drop("_avg", axis=1).head(20)
+
+                fig_sh = go.Figure(data=go.Heatmap(
+                    z=sku_pivot.values,
+                    x=list(sku_pivot.columns),
+                    y=[str(s)[:35] for s in sku_pivot.index],
+                    colorscale=[[0,"#EF5350"],[0.4,"#FFF9C4"],[1,"#43A047"]],
+                    zmid=0,
+                    text=[[f"{v:.0f}%" if not np.isnan(v) else "" for v in row]
+                          for row in sku_pivot.values],
+                    texttemplate="%{text}", textfont=dict(size=9),
+                    hovertemplate="<b>%{y}</b><br>%{x}: %{z:.1f}% uplift<extra></extra>",
+                    colorbar=dict(title="Uplift %", thickness=14)))
+                fig_sh.update_layout(
+                    height=max(300, len(sku_pivot)*28+80),
+                    margin=dict(t=30,b=20,l=10,r=10),
+                    paper_bgcolor="white", plot_bgcolor="white",
+                    xaxis=dict(side="top"),
+                    yaxis=dict(tickfont=dict(size=9)))
+                st.plotly_chart(fig_sh, use_container_width=True)
+                st.caption(f"Top {len(sku_pivot)} SKUs de {sel_dept_heat} con más meses de promoción detectados. "
+                           f"Ordenados por uplift promedio anual.")
+            else:
+                st.info(f"No hay suficientes observaciones de promo en {sel_dept_heat}.")
 
         st.markdown("<br>", unsafe_allow_html=True)
 

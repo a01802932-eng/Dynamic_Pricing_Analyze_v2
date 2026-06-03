@@ -571,6 +571,170 @@ if df_main is None:
     """, unsafe_allow_html=True)
     st.stop()
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ML PIPELINE — RF vs Gradient Boosting + Promo Detection
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(show_spinner=False)
+def run_ml_pipeline(df_csv: bytes, promo_bytes: bytes):
+    from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+    from sklearn.metrics import r2_score, mean_squared_error
+    from sklearn.preprocessing import LabelEncoder
+
+    df = pd.read_csv(io.BytesIO(df_csv), low_memory=False)
+    df["tran_date"]      = pd.to_datetime(df["tran_date"], errors="coerce")
+    df["mes_str"]        = df["tran_date"].dt.to_period("M").astype(str)
+    df["mes_cal"]        = df["tran_date"].dt.month
+    df["venta_con_iva"]  = pd.to_numeric(df["venta_con_iva"], errors="coerce")
+    df["qty"]            = pd.to_numeric(df["qty"],           errors="coerce")
+    df["precio_catalogo"]= pd.to_numeric(df["precio_catalogo"], errors="coerce") \
+                           if "precio_catalogo" in df.columns else pd.Series(np.nan, index=df.index)
+
+    mensual = (df.groupby(["prod_nbr","mes_str"])
+               .agg(unidades=("qty","sum"), venta_tot=("venta_con_iva","sum"),
+                    mes_cal=("mes_cal","first"), es_premium=("es_premium","max"),
+                    dept_nm=("dept_nm","first"), precio_catalogo=("precio_catalogo","mean"))
+               .reset_index())
+    mensual["precio"] = mensual["venta_tot"] / mensual["unidades"]
+    mensual = mensual[mensual["precio"] > 0].copy()
+    mensual["log_precio"]   = np.log(mensual["precio"])
+    mensual["log_unidades"] = np.log1p(mensual["unidades"])
+    mensual["log_venta"]    = np.log1p(mensual["venta_tot"])
+    mensual["precio_vs_cat"] = (mensual["precio"] / mensual["precio_catalogo"].replace(0, np.nan)).fillna(1.0).clip(0.5, 1.5)
+    mensual = mensual.sort_values(["prod_nbr","mes_str"]).reset_index(drop=True)
+
+    # ── Detección promos jerarquía 3 niveles ──────────────────────────────────
+    # N1: boletín oficial (si SKU coincide; si no, igual se usa N2 y N3)
+    oficial_set = set()
+    if promo_bytes and len(promo_bytes) > 0:
+        try:
+            pdf = pd.read_excel(io.BytesIO(promo_bytes))
+            pdf["SKU"] = pdf["SKU"].astype(str).str.replace(".0","",regex=False).str.strip()
+            pdf["Fecha_Inicio"] = pd.to_datetime(pdf["Fecha_Inicio"], dayfirst=True, errors="coerce")
+            pdf["Fecha_Fin"]    = pd.to_datetime(pdf["Fecha_Fin"],    dayfirst=True, errors="coerce")
+            pdf["_flag"] = pd.to_numeric(pdf["Promo_Flag"], errors="coerce")
+            pdf = pdf[(pdf["_flag"]==1) & pdf["Fecha_Inicio"].notna() & pdf["Fecha_Fin"].notna()]
+            for _, row in pdf.iterrows():
+                try:
+                    for m in pd.period_range(row["Fecha_Inicio"], row["Fecha_Fin"], freq="M"):
+                        oficial_set.add((row["SKU"], str(m)))
+                except: continue
+        except: pass
+
+    mensual["promo_official"] = mensual.apply(
+        lambda r: 1 if (r["prod_nbr"], r["mes_str"]) in oficial_set else 0, axis=1)
+
+    # N2: caída de precio ≥ 20% vs precio modal del SKU
+    precio_modal = mensual.groupby("prod_nbr")["precio"].agg(
+        lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else x.median())
+    mensual["precio_modal"] = mensual["prod_nbr"].map(precio_modal)
+    mensual["pct_vs_modal"] = mensual["precio"] / mensual["precio_modal"].replace(0, np.nan)
+    mensual["promo_priceX"] = (mensual["pct_vs_modal"] <= 0.80).astype(int)
+    mensual["pct_desc"]     = (1 - mensual["pct_vs_modal"].clip(upper=1.0)).clip(lower=0.0).fillna(0.0)
+
+    # N3: spike de volumen ≥ p90 (solo SKUs sin N1 ni N2)
+    p90 = mensual.groupby("prod_nbr")["unidades"].quantile(0.90)
+    mensual["p90_units"] = mensual["prod_nbr"].map(p90)
+    mensual["spike_raw"] = (mensual["unidades"] >= mensual["p90_units"]).astype(int)
+    sku_l1l2 = (mensual.groupby("prod_nbr")
+                .apply(lambda g: (g["promo_official"].sum() + g["promo_priceX"].sum()) > 0)
+                .reset_index(name="tiene_l1_l2"))
+    mensual = mensual.merge(sku_l1l2, on="prod_nbr", how="left")
+    mensual["promo_spike"] = (mensual["spike_raw"].astype(bool) & ~mensual["tiene_l1_l2"]).astype(int)
+    mensual["tiene_promo"] = ((mensual["promo_official"]==1) | (mensual["promo_priceX"]==1) | (mensual["promo_spike"]==1)).astype(int)
+    mensual["nivel_promo"] = "Sin promo"
+    mensual.loc[mensual["promo_spike"]==1,   "nivel_promo"] = "N3 - Spike volumen"
+    mensual.loc[mensual["promo_priceX"]==1,  "nivel_promo"] = "N2 - Caida precio"
+    mensual.loc[mensual["promo_official"]==1,"nivel_promo"] = "N1 - Boletin oficial"
+
+    # ── Features de lag ───────────────────────────────────────────────────────
+    grp = mensual.groupby("prod_nbr")
+    mensual["uds_lag1"]       = grp["unidades"].shift(1)
+    mensual["uds_roll3m"]     = grp["unidades"].shift(1).rolling(3, min_periods=1).mean().values
+    mensual["precio_lag1"]    = grp["precio"].shift(1)
+    mensual["precio_chg_pct"] = (mensual["precio"] / mensual["precio_lag1"].replace(0,np.nan) - 1).clip(-0.5,0.5)
+    mensual["log_uds_lag1"]   = np.log1p(mensual["uds_lag1"].fillna(0))
+    mensual["log_uds_roll3m"] = np.log1p(mensual["uds_roll3m"].fillna(0))
+    mes_index = {m: i for i, m in enumerate(sorted(mensual["mes_str"].unique()))}
+    mensual["mes_num"] = mensual["mes_str"].map(mes_index)
+
+    skus_ok = mensual.groupby("prod_nbr")["mes_str"].count()
+    skus_ok = skus_ok[skus_ok >= 6].index
+    mensual = mensual[mensual["prod_nbr"].isin(skus_ok)].dropna(subset=["log_uds_lag1"]).reset_index(drop=True)
+
+    le = LabelEncoder()
+    mensual["dept_enc"] = le.fit_transform(mensual["dept_nm"].fillna("Unknown"))
+
+    FEAT_COLS  = ["log_precio","mes_cal","mes_num","es_premium","dept_enc",
+                  "pct_desc","precio_vs_cat","precio_chg_pct","log_uds_lag1","log_uds_roll3m"]
+    FEAT_NAMES = ["Log Precio","Mes del año","Tendencia temporal","Es Premium","Departamento",
+                  "% Descuento vs modal","Precio vs Catálogo","Cambio precio % (mes ant.)",
+                  "Ventas mes anterior (log)","Media ventas 3m (log)"]
+
+    X = mensual[FEAT_COLS].fillna(0)
+    y_u, y_r = mensual["log_unidades"], mensual["log_venta"]
+    all_months = sorted(mensual["mes_str"].unique())
+    split_idx  = int(len(all_months) * 0.8)
+    train_mask = mensual["mes_str"].isin(set(all_months[:split_idx]))
+    test_mask  = mensual["mes_str"].isin(set(all_months[split_idx:]))
+    X_train, X_test = X[train_mask], X[test_mask]
+
+    # ── Entrenar RF y GB ──────────────────────────────────────────────────────
+    comparacion = {}
+    for nombre, (mu, mr) in {
+        "Random Forest":     (RandomForestRegressor(n_estimators=150, max_depth=8, min_samples_leaf=5, random_state=42, n_jobs=-1),
+                              RandomForestRegressor(n_estimators=150, max_depth=8, min_samples_leaf=5, random_state=42, n_jobs=-1)),
+        "Gradient Boosting": (GradientBoostingRegressor(n_estimators=150, max_depth=5, learning_rate=0.05, subsample=0.8, random_state=42),
+                              GradientBoostingRegressor(n_estimators=150, max_depth=5, learning_rate=0.05, subsample=0.8, random_state=42)),
+    }.items():
+        mu.fit(X_train, y_u[train_mask]); mr.fit(X_train, y_r[train_mask])
+        r2u = r2_score(y_u[test_mask], mu.predict(X_test))
+        r2r = r2_score(y_r[test_mask], mr.predict(X_test))
+        comparacion[nombre] = {"mod_u":mu,"mod_r":mr,"r2_u":round(r2u,4),"r2_r":round(r2r,4),
+                                "r2_avg":round((r2u+r2r)/2,4),
+                                "rmse_u":round(float(np.sqrt(mean_squared_error(y_u[test_mask],mu.predict(X_test)))),4),
+                                "rmse_r":round(float(np.sqrt(mean_squared_error(y_r[test_mask],mr.predict(X_test)))),4)}
+
+    ganador_nm = max(comparacion, key=lambda k: comparacion[k]["r2_avg"])
+    gan = comparacion[ganador_nm]
+    imp = (gan["mod_u"].feature_importances_ + gan["mod_r"].feature_importances_) / 2
+    feat_df = pd.DataFrame({"feature":FEAT_NAMES,"importancia":imp}).sort_values("importancia",ascending=False)
+
+    pred_u = gan["mod_u"].predict(X_test); pred_r = gan["mod_r"].predict(X_test)
+    n_s = min(800, len(pred_u)); idx_s = np.random.choice(len(pred_u), n_s, replace=False)
+
+    sin = mensual[mensual["tiene_promo"]==0]["unidades"].mean()
+    con = mensual[mensual["tiene_promo"]==1]["unidades"].mean() if mensual["tiene_promo"].sum()>0 else sin
+    uplift = (con-sin)/sin*100 if sin>0 else 0
+    promo_by_nivel = (mensual.groupby("nivel_promo").agg(n=("prod_nbr","count"),avg_u=("unidades","mean")).reset_index())
+    promo_by_nivel["uplift"] = (promo_by_nivel["avg_u"]-sin)/sin*100
+
+    mt = mensual[test_mask].copy()
+    Xb = mt[FEAT_COLS].fillna(0).copy(); Xl = Xb.copy()
+    Xl["log_precio"] += np.log(0.90); Xl["pct_desc"] = (Xb["pct_desc"]+0.10).clip(0,1)
+    pb = np.expm1(gan["mod_u"].predict(Xb)); pl = np.expm1(gan["mod_u"].predict(Xl))
+    mt["uplift_precio"] = (pl-pb)/(pb+1e-9)*100
+    dept_map = mensual[["prod_nbr","dept_nm"]].drop_duplicates("prod_nbr").set_index("prod_nbr")["dept_nm"]
+    top_sens = (mt.groupby("prod_nbr").agg(uplift=("uplift_precio","mean")).reset_index()
+                .sort_values("uplift",ascending=False).head(10))
+    top_sens["dept"] = top_sens["prod_nbr"].map(dept_map)
+
+    comp_out = {k:{kk:vv for kk,vv in v.items() if kk not in ("mod_u","mod_r")} for k,v in comparacion.items()}
+    return {"ganador":ganador_nm,"comparacion":comp_out,"feat_df":feat_df,
+            "r2_u":gan["r2_u"],"r2_r":gan["r2_r"],
+            "actual_u":np.expm1(y_u[test_mask].values[idx_s]).tolist(),
+            "fitted_u":np.expm1(pred_u[idx_s]).tolist(),
+            "actual_r":np.expm1(y_r[test_mask].values[idx_s]).tolist(),
+            "fitted_r":np.expm1(pred_r[idx_s]).tolist(),
+            "n_train":int(train_mask.sum()),"n_test":int(test_mask.sum()),
+            "train_range":f"{all_months[0]} - {all_months[split_idx-1]}",
+            "test_range":f"{all_months[split_idx]} - {all_months[-1]}",
+            "n_skus":len(skus_ok),"promo_uplift":round(uplift,1),
+            "promo_by_nivel":promo_by_nivel,
+            "n_promo":int(mensual["tiene_promo"].sum()),"n_total":len(mensual),
+            "top_sens":top_sens}
+
+
 tab1, tab2, tab3 = st.tabs(["🧮  Calculadora","📈  Dashboard Descriptivo","🎯  Dashboard Predictivo"])
 
 
@@ -930,208 +1094,6 @@ def generate_sku_narrative(sku_row, sku_sim, sku_cal):
                  f"(R²={r2:.3f}, p={pval:.3f}, {n_m} meses de datos)")
 
     return f"### {nm[:60]}\n\nEste producto {elast_txt}\n\n{accion_txt}{sim_note}{cal_note}{conf_nota}"
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# ML PIPELINE — RF vs Gradient Boosting + Promo Detection
-# ══════════════════════════════════════════════════════════════════════════════
-
-@st.cache_data(show_spinner=False)
-def run_ml_pipeline(df_csv: bytes, promo_bytes: bytes):
-    from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-    from sklearn.metrics import r2_score, mean_squared_error
-    from sklearn.preprocessing import LabelEncoder
-
-    df = pd.read_csv(io.BytesIO(df_csv), low_memory=False)
-    df["tran_date"]      = pd.to_datetime(df["tran_date"], errors="coerce")
-    df["mes_str"]        = df["tran_date"].dt.to_period("M").astype(str)
-    df["mes_cal"]        = df["tran_date"].dt.month
-    df["venta_con_iva"]  = pd.to_numeric(df["venta_con_iva"], errors="coerce")
-    df["qty"]            = pd.to_numeric(df["qty"],           errors="coerce")
-    df["precio_catalogo"]= pd.to_numeric(df.get("precio_catalogo", pd.Series(dtype=float)), errors="coerce") \
-                           if "precio_catalogo" in df.columns else pd.Series(np.nan, index=df.index)
-
-    # Agregación mensual
-    mensual = (df.groupby(["prod_nbr","mes_str"])
-               .agg(unidades=("qty","sum"), venta_tot=("venta_con_iva","sum"),
-                    mes_cal=("mes_cal","first"), es_premium=("es_premium","max"),
-                    dept_nm=("dept_nm","first"),
-                    precio_catalogo=("precio_catalogo","mean"))
-               .reset_index())
-    mensual["precio"] = mensual["venta_tot"] / mensual["unidades"]
-    mensual = mensual[mensual["precio"] > 0].copy()
-    mensual["log_precio"]   = np.log(mensual["precio"])
-    mensual["log_unidades"] = np.log1p(mensual["unidades"])
-    mensual["log_venta"]    = np.log1p(mensual["venta_tot"])
-
-    # Precio vs catálogo
-    mensual["precio_vs_cat"] = (mensual["precio"] / mensual["precio_catalogo"].replace(0, np.nan)).fillna(1.0).clip(0.5, 1.5)
-
-    # ── Detección promos 3 niveles ────────────────────────────────────────────
-    mensual = mensual.sort_values(["prod_nbr","mes_str"]).reset_index(drop=True)
-
-    # Nivel 1: boletín oficial
-    oficial_set = set()
-    if promo_bytes and len(promo_bytes) > 0:
-        try:
-            pdf = pd.read_excel(io.BytesIO(promo_bytes))
-            pdf["SKU"] = pdf["SKU"].astype(str).str.replace(".0","",regex=False).str.strip()
-            pdf["Fecha_Inicio"] = pd.to_datetime(pdf["Fecha_Inicio"], dayfirst=True, errors="coerce")
-            pdf["Fecha_Fin"]    = pd.to_datetime(pdf["Fecha_Fin"],    dayfirst=True, errors="coerce")
-            pdf["_flag"] = pd.to_numeric(pdf["Promo_Flag"], errors="coerce")
-            pdf = pdf[(pdf["_flag"]==1) & pdf["Fecha_Inicio"].notna() & pdf["Fecha_Fin"].notna()]
-            for _, row in pdf.iterrows():
-                try:
-                    for m in pd.period_range(row["Fecha_Inicio"], row["Fecha_Fin"], freq="M"):
-                        oficial_set.add((row["SKU"], str(m)))
-                except: continue
-        except: pass
-
-    mensual["promo_official"] = mensual.apply(
-        lambda r: 1 if (r["prod_nbr"], r["mes_str"]) in oficial_set else 0, axis=1)
-
-    # Nivel 2: caída de precio ≥ 20% vs precio modal
-    precio_modal = mensual.groupby("prod_nbr")["precio"].agg(
-        lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else x.median())
-    mensual["precio_modal"] = mensual["prod_nbr"].map(precio_modal)
-    mensual["pct_vs_modal"] = mensual["precio"] / mensual["precio_modal"].replace(0, np.nan)
-    mensual["promo_priceX"] = (mensual["pct_vs_modal"] <= 0.80).astype(int)
-    mensual["pct_desc"]     = (1 - mensual["pct_vs_modal"].clip(upper=1.0)).clip(lower=0.0).fillna(0.0)
-
-    # Nivel 3: spike de volumen (solo para SKUs sin L1/L2)
-    p90 = mensual.groupby("prod_nbr")["unidades"].quantile(0.90)
-    mensual["p90_units"] = mensual["prod_nbr"].map(p90)
-    mensual["spike_raw"] = (mensual["unidades"] >= mensual["p90_units"]).astype(int)
-    sku_l1l2 = (mensual.groupby("prod_nbr")
-                .apply(lambda g: (g["promo_official"].sum() + g["promo_priceX"].sum()) > 0)
-                .reset_index(name="tiene_l1_l2"))
-    mensual = mensual.merge(sku_l1l2, on="prod_nbr", how="left")
-    mensual["promo_spike"] = (mensual["spike_raw"].astype(bool) & ~mensual["tiene_l1_l2"]).astype(int)
-
-    mensual["tiene_promo"] = ((mensual["promo_official"]==1) |
-                               (mensual["promo_priceX"]==1)  |
-                               (mensual["promo_spike"]==1)).astype(int)
-    mensual["nivel_promo"] = "Sin promo"
-    mensual.loc[mensual["promo_spike"]==1,   "nivel_promo"] = "N3 - Spike volumen"
-    mensual.loc[mensual["promo_priceX"]==1,  "nivel_promo"] = "N2 - Caida precio"
-    mensual.loc[mensual["promo_official"]==1,"nivel_promo"] = "N1 - Boletin oficial"
-
-    # ── Features de lag ───────────────────────────────────────────────────────
-    grp = mensual.groupby("prod_nbr")
-    mensual["uds_lag1"]       = grp["unidades"].shift(1)
-    mensual["uds_roll3m"]     = grp["unidades"].shift(1).rolling(3, min_periods=1).mean().values
-    mensual["precio_lag1"]    = grp["precio"].shift(1)
-    mensual["precio_chg_pct"] = (mensual["precio"] / mensual["precio_lag1"].replace(0,np.nan) - 1).clip(-0.5,0.5)
-    mensual["log_uds_lag1"]   = np.log1p(mensual["uds_lag1"].fillna(0))
-    mensual["log_uds_roll3m"] = np.log1p(mensual["uds_roll3m"].fillna(0))
-
-    mes_index = {m: i for i, m in enumerate(sorted(mensual["mes_str"].unique()))}
-    mensual["mes_num"] = mensual["mes_str"].map(mes_index)
-
-    # Filtrar SKUs con >= 6 meses y filas con lags válidos
-    skus_ok = mensual.groupby("prod_nbr")["mes_str"].count()
-    skus_ok = skus_ok[skus_ok >= 6].index
-    mensual = mensual[mensual["prod_nbr"].isin(skus_ok)].dropna(subset=["log_uds_lag1"]).reset_index(drop=True)
-
-    le = LabelEncoder()
-    mensual["dept_enc"] = le.fit_transform(mensual["dept_nm"].fillna("Unknown"))
-
-    FEAT_COLS  = ["log_precio","mes_cal","mes_num","es_premium","dept_enc",
-                  "pct_desc","precio_vs_cat","precio_chg_pct","log_uds_lag1","log_uds_roll3m"]
-    FEAT_NAMES = ["Log Precio","Mes del año","Tendencia temporal","Es Premium","Departamento",
-                  "% Descuento vs modal","Precio vs Catálogo","Cambio precio % (mes ant.)",
-                  "Ventas mes anterior (log)","Media ventas 3m (log)"]
-
-    X = mensual[FEAT_COLS].fillna(0)
-    y_u = mensual["log_unidades"]
-    y_r = mensual["log_venta"]
-
-    all_months  = sorted(mensual["mes_str"].unique())
-    split_idx   = int(len(all_months) * 0.8)
-    train_mask  = mensual["mes_str"].isin(set(all_months[:split_idx]))
-    test_mask   = mensual["mes_str"].isin(set(all_months[split_idx:]))
-
-    X_train, X_test = X[train_mask], X[test_mask]
-
-    # ── Entrenar RF y GB ──────────────────────────────────────────────────────
-    comparacion = {}
-    for nombre, (mu, mr) in {
-        "Random Forest":     (RandomForestRegressor(n_estimators=150, max_depth=8,
-                                                    min_samples_leaf=5, random_state=42, n_jobs=-1),
-                              RandomForestRegressor(n_estimators=150, max_depth=8,
-                                                    min_samples_leaf=5, random_state=42, n_jobs=-1)),
-        "Gradient Boosting": (GradientBoostingRegressor(n_estimators=150, max_depth=5,
-                                                         learning_rate=0.05, subsample=0.8, random_state=42),
-                              GradientBoostingRegressor(n_estimators=150, max_depth=5,
-                                                         learning_rate=0.05, subsample=0.8, random_state=42)),
-    }.items():
-        mu.fit(X_train, y_u[train_mask])
-        mr.fit(X_train, y_r[train_mask])
-        r2u = r2_score(y_u[test_mask], mu.predict(X_test))
-        r2r = r2_score(y_r[test_mask], mr.predict(X_test))
-        comparacion[nombre] = {"mod_u": mu, "mod_r": mr, "r2_u": round(r2u,4),
-                                "r2_r": round(r2r,4), "r2_avg": round((r2u+r2r)/2,4),
-                                "rmse_u": round(float(np.sqrt(mean_squared_error(y_u[test_mask], mu.predict(X_test)))),4),
-                                "rmse_r": round(float(np.sqrt(mean_squared_error(y_r[test_mask], mr.predict(X_test)))),4)}
-
-    ganador_nm = max(comparacion, key=lambda k: comparacion[k]["r2_avg"])
-    gan = comparacion[ganador_nm]
-
-    # Feature importance del ganador (promedio unidades + ventas)
-    imp = (gan["mod_u"].feature_importances_ + gan["mod_r"].feature_importances_) / 2
-    feat_df = pd.DataFrame({"feature": FEAT_NAMES, "importancia": imp}).sort_values("importancia", ascending=False)
-
-    # Predicho vs real (test, muestra de 800 pts)
-    pred_u = gan["mod_u"].predict(X_test)
-    pred_r = gan["mod_r"].predict(X_test)
-    n_s = min(800, len(pred_u))
-    idx_s = np.random.choice(len(pred_u), n_s, replace=False)
-    actual_u = np.expm1(y_u[test_mask].values[idx_s])
-    fitted_u = np.expm1(pred_u[idx_s])
-    actual_r = np.expm1(y_r[test_mask].values[idx_s])
-    fitted_r = np.expm1(pred_r[idx_s])
-
-    # Promo stats descriptivos
-    sin = mensual[mensual["tiene_promo"]==0]["unidades"].mean()
-    con = mensual[mensual["tiene_promo"]==1]["unidades"].mean() if mensual["tiene_promo"].sum() > 0 else sin
-    uplift = (con - sin) / sin * 100 if sin > 0 else 0
-    promo_by_nivel = (mensual.groupby("nivel_promo")
-                      .agg(n=("prod_nbr","count"), avg_u=("unidades","mean"))
-                      .reset_index())
-    promo_by_nivel["uplift"] = (promo_by_nivel["avg_u"] - sin) / sin * 100
-
-    # SKUs más sensibles al precio (-10%)
-    mt = mensual[test_mask].copy()
-    Xb = mt[FEAT_COLS].fillna(0).copy()
-    Xl = Xb.copy(); Xl["log_precio"] += np.log(0.90); Xl["pct_desc"] = (Xb["pct_desc"]+0.10).clip(0,1)
-    pb = np.expm1(gan["mod_u"].predict(Xb))
-    pl = np.expm1(gan["mod_u"].predict(Xl))
-    mt["uplift_precio"] = (pl - pb) / (pb + 1e-9) * 100
-    dept_map = mensual[["prod_nbr","dept_nm"]].drop_duplicates("prod_nbr").set_index("prod_nbr")["dept_nm"]
-    top_sens = (mt.groupby("prod_nbr").agg(uplift=("uplift_precio","mean")).reset_index()
-                .sort_values("uplift", ascending=False).head(10))
-    top_sens["dept"] = top_sens["prod_nbr"].map(dept_map)
-
-    comp_out = {k: {kk: vv for kk, vv in v.items() if kk not in ("mod_u","mod_r")}
-                for k, v in comparacion.items()}
-
-    return {
-        "ganador": ganador_nm,
-        "comparacion": comp_out,
-        "feat_df": feat_df,
-        "r2_u": gan["r2_u"], "r2_r": gan["r2_r"],
-        "actual_u": actual_u.tolist(), "fitted_u": fitted_u.tolist(),
-        "actual_r": actual_r.tolist(), "fitted_r": fitted_r.tolist(),
-        "n_train": int(train_mask.sum()), "n_test": int(test_mask.sum()),
-        "train_range": f"{all_months[0]} – {all_months[split_idx-1]}",
-        "test_range":  f"{all_months[split_idx]} – {all_months[-1]}",
-        "n_skus": len(skus_ok),
-        "promo_uplift": round(uplift,1),
-        "promo_by_nivel": promo_by_nivel,
-        "n_promo": int(mensual["tiene_promo"].sum()),
-        "n_total": len(mensual),
-        "top_sens": top_sens,
-    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════

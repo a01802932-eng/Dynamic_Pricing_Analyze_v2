@@ -1178,6 +1178,45 @@ with tab3:
 
     rec_counts = df_m1a["recomendacion"].value_counts()
 
+    # ── Resumen general siempre visible ──────────────────────────────────────
+    section("📊 Resumen general")
+    rc = st.columns(4)
+    for i,(rec,color) in enumerate(REC_COLORS.items()):
+        cnt = rec_counts.get(rec,0)
+        pct = cnt/len(df_m1a)*100 if len(df_m1a)>0 else 0
+        rc[i].markdown(
+            f'<div class="rec-card" style="border-left:5px solid {color};padding:14px;">'
+            f'<div style="font-size:30px;font-weight:900;color:{color};">{cnt}</div>'
+            f'<div style="font-size:11px;font-weight:700;color:#333;">{rec.upper()}</div>'
+            f'<div style="font-size:10px;color:#999;">{pct:.1f}% del total</div></div>',
+            unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Mini gráfica de distribución de betas + donut lado a lado
+    mg1, mg2 = st.columns([3,2])
+    with mg1:
+        fig = px.histogram(df_m1a, x="beta", nbins=35,
+                           color="recomendacion", color_discrete_map=REC_COLORS,
+                           title="Distribución de elasticidad (β) de todos los productos analizados",
+                           labels={"beta":"Beta","count":"SKUs"},
+                           barmode="overlay", opacity=0.75)
+        fig.add_vline(x=-1,   line_dash="dash", line_color="gray", opacity=0.6, annotation_text="β=-1")
+        fig.add_vline(x=-1.5, line_dash="dot",  line_color="gray", opacity=0.5, annotation_text="β=-1.5")
+        fig.add_vline(x=0, line_color="black", line_width=0.5, opacity=0.3)
+        st.plotly_chart(_layout(fig, h=260), use_container_width=True)
+    with mg2:
+        fig = px.pie(values=rec_counts.values, names=rec_counts.index,
+                     title="SKUs por recomendación",
+                     color=rec_counts.index, color_discrete_map=REC_COLORS)
+        fig.update_traces(textposition="inside", textinfo="percent+label", textfont_size=10,
+                          hovertemplate="<b>%{label}</b><br>%{value} SKUs<extra></extra>")
+        fig.update_layout(showlegend=False, height=260, paper_bgcolor="white",
+                          margin=dict(t=40,b=10,l=10,r=10))
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+
     # ── Selector: general o por producto ─────────────────────────────────────
     section("🔍 Análisis por producto")
     st.caption("Selecciona un producto para ver exactamente qué hacer con su precio y en qué meses. "

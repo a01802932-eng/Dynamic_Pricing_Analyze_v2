@@ -1197,38 +1197,134 @@ with tab3:
                 try:
                     import anthropic as _anthropic
                     _client = _anthropic.Anthropic(api_key=_api_key)
+
+                    # ── Conteos por recomendación ──────────────────────────────
                     _n_subir = len(df_m1a[df_m1a["recomendacion"]=="Subir precio"])
                     _n_prom  = len(df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"])
                     _n_mant  = len(df_m1a[df_m1a["recomendacion"]=="Mantener precio"])
                     _n_norec = len(df_m1a[df_m1a["recomendacion"]=="No recomendable"])
-                    _top_sub = df_m1a[df_m1a["recomendacion"]=="Subir precio"].nsmallest(5,"pval")[["prod_nm","beta","r2","pval"]].to_string(index=False)
-                    _top_prm = df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"].nsmallest(5,"pval")[["prod_nm","beta","r2","pval"]].to_string(index=False)
-                    _prompt = f"""Eres un consultor de revenue management para OfficeMax México.
-Analiza estos resultados de un modelo de elasticidad precio y escribe un reporte ejecutivo en español.
 
-RESULTADOS DEL MODELO:
-- Modelo global: R²={m2['r2']:.4f}, Beta={m2['beta']:.4f}, p-valor={m2['beta_pval']:.4f}, N={m2['n_obs']:,}
-- SKUs analizados: {len(df_m1a)} con modelo válido
-- SUBIR PRECIO (inelásticos, β entre 0 y -1): {_n_subir} SKUs
-- MANTENER PRECIO (unitarios, β entre -1 y -1.5): {_n_mant} SKUs
-- BAJAR/PROMOVER (elásticos, β < -1.5): {_n_prom} SKUs
-- SIN RECOMENDACIÓN: {_n_norec} SKUs
+                    # ── Top candidatos con impacto simulado ────────────────────
+                    def _build_candidate_table(rec_label, escenario, top_n=8):
+                        pool = df_m1a[df_m1a["recomendacion"]==rec_label].nsmallest(top_n, "pval")
+                        rows = []
+                        for _, r in pool.iterrows():
+                            sim_r = df_sim[(df_sim["prod_nm"]==r["prod_nm"]) & (df_sim["cambio"]==escenario)]
+                            base_r = df_sim[(df_sim["prod_nm"]==r["prod_nm"]) & (df_sim["cambio"]=="Base 0%")]
+                            if len(sim_r) > 0 and len(base_r) > 0:
+                                delta_rev = sim_r.iloc[0]["ingreso_est"] - base_r.iloc[0]["ingreso_est"]
+                                delta_pct = sim_r.iloc[0]["delta_ingreso_pct"]
+                                rows.append(
+                                    f"  • {r['prod_nm'][:45]} | Depto: {str(r.get('dept_nm',''))[:20]} | "
+                                    f"β={r['beta']:.2f} | R²={r['r2']:.2f} | p={r['pval']:.3f} | "
+                                    f"Δingreso {escenario}: {delta_pct:+.1f}% (${delta_rev:+,.0f}/mes)")
+                            else:
+                                rows.append(
+                                    f"  • {r['prod_nm'][:45]} | Depto: {str(r.get('dept_nm',''))[:20]} | "
+                                    f"β={r['beta']:.2f} | R²={r['r2']:.2f} | p={r['pval']:.3f}")
+                        return "\n".join(rows) if rows else "  (ninguno)"
 
-TOP CANDIDATOS PARA SUBIR PRECIO:
-{_top_sub}
+                    _cand_subir = _build_candidate_table("Subir precio",     "+10%")
+                    _cand_mant  = _build_candidate_table("Mantener precio",  "Base 0%", top_n=5)
+                    _cand_prom  = _build_candidate_table("Bajar / Promover", "-10%")
 
-TOP CANDIDATOS PARA PROMOVER:
-{_top_prm}
+                    # ── Resumen por departamento ───────────────────────────────
+                    _dept_summary = ""
+                    if "dept_nm" in df_m1a.columns:
+                        _dg = (df_m1a.groupby(["dept_nm","recomendacion"])
+                               .size().unstack(fill_value=0).reset_index())
+                        _dept_summary = "DISTRIBUCIÓN POR DEPARTAMENTO:\n"
+                        for _, dr in _dg.iterrows():
+                            _dept_summary += f"  {str(dr['dept_nm'])[:30]}: "
+                            for rec in ["Subir precio","Mantener precio","Bajar / Promover","No recomendable"]:
+                                if rec in dr.index and dr[rec] > 0:
+                                    _dept_summary += f"{rec}={int(dr[rec])} "
+                            _dept_summary += "\n"
 
-Escribe un reporte ejecutivo con estas secciones (máximo 250 palabras total):
-1. **Hallazgo principal** (1-2 oraciones sobre qué encontró el modelo)
-2. **Recomendaciones inmediatas** (qué hacer en los próximos 30 días)
-3. **Limitaciones y próximos pasos** (qué necesita OfficeMax para mejorar el análisis)
+                    # ── Mejores meses globales ─────────────────────────────────
+                    _cal_summary = ""
+                    if len(df_cal) > 0:
+                        _ms_subir = df_cal[df_cal["accion"]=="SUBIR"]["mes_nombre"].value_counts().head(3).index.tolist()
+                        _ms_prom  = df_cal[df_cal["accion"]=="PROMOVER"]["mes_nombre"].value_counts().head(3).index.tolist()
+                        _cal_summary = (f"ESTACIONALIDAD ÓPTIMA:\n"
+                                        f"  Meses con más SKUs para SUBIR precio: {', '.join(_ms_subir) or 'N/A'}\n"
+                                        f"  Meses con más SKUs para PROMOVER: {', '.join(_ms_prom) or 'N/A'}")
 
-Tono: profesional pero directo. Lenguaje de negocio, no técnico."""
+                    # ── Impacto financiero agregado ────────────────────────────
+                    _fin_summary = ""
+                    if len(df_sim) > 0:
+                        def _total_delta(recs, esc):
+                            skus = df_m1a[df_m1a["recomendacion"].isin(recs)]["prod_nm"].tolist()
+                            base = df_sim[(df_sim["prod_nm"].isin(skus)) & (df_sim["cambio"]=="Base 0%")]["ingreso_est"].sum()
+                            best = df_sim[(df_sim["prod_nm"].isin(skus)) & (df_sim["cambio"]==esc)]["ingreso_est"].sum()
+                            return best - base
+                        _d_sub = _total_delta(["Subir precio"], "+10%")
+                        _d_prm = _total_delta(["Bajar / Promover"], "-10%")
+                        _fin_summary = (f"IMPACTO FINANCIERO ESTIMADO (si se aplican las recomendaciones):\n"
+                                        f"  Subir precio en {_n_subir} SKUs inelásticos (+10%): ${_d_sub:+,.0f}/mes\n"
+                                        f"  Activar promos en {_n_prom} SKUs elásticos (-10%): ${_d_prm:+,.0f}/mes\n"
+                                        f"  Total combinado mensual: ${(_d_sub+_d_prm):+,.0f}/mes")
+
+                    _prompt = f"""Eres un consultor senior de revenue management para OfficeMax México.
+Analiza los resultados detallados del modelo de elasticidad precio y escribe un reporte ejecutivo accionable en español.
+
+══════════════════════════════════════
+MODELO ESTADÍSTICO (Validación Global)
+══════════════════════════════════════
+R²={m2['r2']:.4f} | Beta global={m2['beta']:.4f} | p-valor={m2['beta_pval']:.4f} | N observaciones={m2['n_obs']:,}
+Interpretación: por cada 1% de cambio en precio, las ventas cambian {m2['beta']:.2f}% en promedio.
+El modelo {'SÍ es' if m2['beta_pval'] < 0.10 else 'NO es'} estadísticamente significativo.
+RMSE (error promedio en escala log)={m2['rmse']:.4f}
+
+══════════════════════════════════════
+DISTRIBUCIÓN DE RECOMENDACIONES
+══════════════════════════════════════
+Total SKUs con modelo: {len(df_m1a)}
+• SUBIR PRECIO  (β entre 0 y -1, inelásticos):    {_n_subir} SKUs ({_n_subir/len(df_m1a)*100:.1f}%)
+• MANTENER       (β entre -1 y -1.5, unitarios):  {_n_mant} SKUs ({_n_mant/len(df_m1a)*100:.1f}%)
+• BAJAR/PROMOVER (β < -1.5, elásticos):            {_n_prom} SKUs ({_n_prom/len(df_m1a)*100:.1f}%)
+• SIN RECOMENDACIÓN (estadística insuficiente):    {_n_norec} SKUs ({_n_norec/len(df_m1a)*100:.1f}%)
+
+{_dept_summary}
+══════════════════════════════════════
+CANDIDATOS PARA SUBIR PRECIO (inelásticos — subir no aleja clientes)
+══════════════════════════════════════
+{_cand_subir}
+
+══════════════════════════════════════
+CANDIDATOS PARA MANTENER PRECIO
+══════════════════════════════════════
+{_cand_mant}
+
+══════════════════════════════════════
+CANDIDATOS PARA PROMOVER / BAJAR PRECIO (elásticos — bajar genera más volumen)
+══════════════════════════════════════
+{_cand_prom}
+
+{_cal_summary}
+
+{_fin_summary}
+
+══════════════════════════════════════
+INSTRUCCIONES PARA EL REPORTE
+══════════════════════════════════════
+Escribe un reporte ejecutivo con las siguientes secciones. Sé específico: menciona nombres reales de productos, departamentos, cifras concretas del modelo. No digas cosas genéricas como "hay oportunidades de mejora".
+
+1. **🔍 Hallazgo principal** (2-3 oraciones): qué patrón de elasticidad domina en el catálogo y qué significa para OfficeMax.
+
+2. **🔵 Acción inmediata — Subir precio** (3-5 bullets): nombra los productos/departamentos prioritarios, qué beta tienen, qué impacto estimado en ingreso. Explica por qué son inelásticos en términos de negocio.
+
+3. **🟢 Acción inmediata — Activar promociones** (3-5 bullets): nombra los productos/departamentos prioritarios, qué ganancia en volumen se espera, en qué meses conviene más según la estacionalidad.
+
+4. **📅 Timing recomendado**: cuándo ejecutar cada acción basándote en los datos de estacionalidad.
+
+5. **⚠️ Limitaciones y próximos pasos** (2-3 bullets): qué datos adicionales harían el modelo más preciso, qué productos necesitan más historial.
+
+Tono: directo, ejecutivo, orientado a acción. Máximo 400 palabras."""
+
                     _resp = _client.messages.create(
                         model="claude-haiku-4-5-20251001",
-                        max_tokens=600,
+                        max_tokens=1000,
                         messages=[{"role":"user","content":_prompt}])
                     st.session_state["ai_analysis"] = _resp.content[0].text
                 except Exception as _e:
@@ -1363,6 +1459,38 @@ Tono: profesional pero directo. Lenguaje de negocio, no técnico."""
             st.plotly_chart(_layout(fig, h=320), use_container_width=True)
 
         st.stop()
+
+    # ── Impacto de negocio estimado ───────────────────────────────────────────
+    section("💰 Impacto potencial de negocio — si implementas las recomendaciones")
+    st.caption("Estimación del modelo con los datos actuales. Con más historial, la precisión aumenta.")
+
+    if len(df_sim) > 0:
+        _sub_pool = df_m1a[df_m1a["recomendacion"]=="Subir precio"]["prod_nm"].tolist()
+        _prm_pool = df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"]["prod_nm"].tolist()
+
+        def _delta_rev(nms, esc):
+            base = df_sim[(df_sim["prod_nm"].isin(nms)) & (df_sim["cambio"]=="Base 0%")]["ingreso_est"].sum()
+            best = df_sim[(df_sim["prod_nm"].isin(nms)) & (df_sim["cambio"]==esc)]["ingreso_est"].sum()
+            return best - base
+
+        def _delta_uds(nms, esc):
+            base = df_sim[(df_sim["prod_nm"].isin(nms)) & (df_sim["cambio"]=="Base 0%")]["unidades_est"].sum()
+            best = df_sim[(df_sim["prod_nm"].isin(nms)) & (df_sim["cambio"]==esc)]["unidades_est"].sum()
+            return best - base
+
+        _ing_sub  = _delta_rev(_sub_pool, "+10%")
+        _ing_prm  = _delta_rev(_prm_pool, "-10%")
+        _uds_prm  = _delta_uds(_prm_pool, "-10%")
+        _total    = _ing_sub + _ing_prm
+
+        _ic1, _ic2, _ic3, _ic4 = st.columns(4)
+        kpi(_ic1, f"Subir precio — {len(_sub_pool)} SKUs (+10%)",
+            f"+${_ing_sub:,.0f}/mes", OM_BLUE)
+        kpi(_ic2, f"Promover — {len(_prm_pool)} SKUs (-10%)",
+            f"+${_ing_prm:,.0f}/mes" if _ing_prm >= 0 else f"${_ing_prm:,.0f}/mes", OM_GREEN)
+        kpi(_ic3, "Unidades extra por promos", f"+{_uds_prm:,.0f}/mes", OM_AMBER)
+        kpi(_ic4, "Impacto total anualizado",  f"+${_total*12:,.0f}/año", OM_RED)
+        st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Calendario mensual de acciones ────────────────────────────────────────
     section("📅 ¿En qué meses actuar? — Calendario de acciones")

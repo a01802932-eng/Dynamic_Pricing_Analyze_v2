@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Dynamic Pricing Analyzer v3 — Streamlit App | OfficeMax México"""
 
-import io, zipfile, warnings
+import io, zipfile, warnings, os
 from pathlib import Path
 
 import numpy as np
@@ -93,7 +93,7 @@ html, body, [class*="css"] { font-family: 'Roboto', Arial, sans-serif !important
 # ══════════════════════════════════════════════════════════════════════════════
 # SESSION STATE
 # ══════════════════════════════════════════════════════════════════════════════
-for _k in ["df_main", "clean_report", "results", "df_csv_bytes", "loaded_file_name"]:
+for _k in ["df_main", "clean_report", "results", "df_csv_bytes", "loaded_file_name", "ai_analysis"]:
     if _k not in st.session_state:
         st.session_state[_k] = None
 
@@ -321,6 +321,14 @@ def run_models(df_csv: bytes, min_obs, min_cv, min_r2, max_beta, pval_thresh, ru
     X2 = add_constant(X2); y2 = agg2["log_u1"].values
     msk = np.isfinite(X2.values).all(axis=1) & np.isfinite(y2)
     mod2 = OLS(y2[msk], X2[msk]).fit()
+    # Muestra aleatoria para scatter predicho vs real (max 1500 puntos)
+    y2_actual = y2[msk]
+    y2_fitted = mod2.fittedvalues
+    n_sample  = min(1500, len(y2_actual))
+    idx_sample = np.random.choice(len(y2_actual), size=n_sample, replace=False)
+    actual_sample = np.expm1(y2_actual[idx_sample])
+    fitted_sample = np.expm1(y2_fitted[idx_sample])
+
     m2 = {"n_obs":int(mod2.nobs),"r2":round(float(mod2.rsquared),4),
           "r2_adj":round(float(mod2.rsquared_adj),4),
           "beta":round(float(mod2.params["log_precio"]),4),
@@ -328,7 +336,9 @@ def run_models(df_csv: bytes, min_obs, min_cv, min_r2, max_beta, pval_thresh, ru
           "premium":round(float(mod2.params["es_premium"]),4),
           "prem_pval":round(float(mod2.pvalues["es_premium"]),4),
           "rmse":round(float(np.sqrt(np.mean((y2[msk]-mod2.fittedvalues)**2))),4),
-          "f_stat":round(float(mod2.fvalue),2)}
+          "f_stat":round(float(mod2.fvalue),2),
+          "actual_sample": actual_sample.tolist(),
+          "fitted_sample": fitted_sample.tolist()}
 
     # Classify — cap económico en |b|>3 (betas más extremas no son creíbles en retail)
     def _classify(row):
@@ -687,6 +697,105 @@ with tab1:
                     st.download_button("⬇️ Descargar simulación de precios (CSV)",
                         results["sim"].to_csv(index=False).encode("utf-8"),"simulacion_precios.csv","text/csv")
 
+        # ── Validación visual del modelo ──────────────────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        section("🎯 ¿Qué tan bien predice el modelo? — Predicción vs Realidad")
+        st.caption("Cada punto es una observación. Entre más cerca estén los puntos de la línea diagonal, "
+                   "más preciso es el modelo. Un modelo perfecto tendría todos los puntos sobre la línea.")
+
+        actual  = m2.get("actual_sample", [])
+        fitted  = m2.get("fitted_sample", [])
+
+        if actual and fitted:
+            vv1, vv2 = st.columns([2, 1])
+            with vv1:
+                max_val = float(np.percentile(actual + fitted, 95))
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=actual, y=fitted, mode="markers",
+                    marker=dict(size=4, color=OM_RED, opacity=0.35),
+                    hovertemplate="Real: %{x:.0f} uds<br>Predicho: %{y:.0f} uds<extra></extra>",
+                    name="Observaciones"))
+                fig.add_trace(go.Scatter(
+                    x=[0, max_val], y=[0, max_val],
+                    mode="lines", line=dict(color=OM_BLUE, dash="dash", width=2),
+                    name="Predicción perfecta"))
+                fig.update_layout(
+                    plot_bgcolor="white", paper_bgcolor="white",
+                    height=380, margin=dict(t=30,b=40,l=40,r=20),
+                    xaxis=dict(title="Unidades reales vendidas", range=[0, max_val]),
+                    yaxis=dict(title="Unidades predichas por el modelo", range=[0, max_val]),
+                    legend=dict(orientation="h", y=1.05))
+                st.plotly_chart(fig, use_container_width=True)
+
+            with vv2:
+                r2_pct = m2["r2"] * 100
+                r2_color = OM_GREEN if m2["r2"] >= 0.4 else (OM_AMBER if m2["r2"] >= 0.15 else OM_RED)
+                st.markdown(f"""
+                <div style="background:white;border-radius:14px;padding:24px;
+                            text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.08);
+                            border-top:5px solid {r2_color}; margin-bottom:16px;">
+                    <div style="font-size:48px;font-weight:900;color:{r2_color};">{r2_pct:.1f}%</div>
+                    <div style="font-size:13px;color:#555;margin-top:6px;">
+                        de la variación en ventas explicada por el precio
+                    </div>
+                    <div style="font-size:11px;color:#999;margin-top:4px;">(R² del Modelo Global)</div>
+                </div>
+                <div style="background:white;border-radius:14px;padding:18px;
+                            box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+                    <div style="font-size:12px;color:#555;line-height:2.2;">
+                    <b>Confianza estadística:</b><br>
+                    {"✅ Alta (p < 0.05)" if m2["beta_pval"] < 0.05 else "⚠️ Media (p < 0.10)" if m2["beta_pval"] < 0.10 else "❌ Baja"}<br>
+                    <b>Error promedio (RMSE):</b> {m2["rmse"]:.4f}<br>
+                    <b>SKUs con recomendación válida:</b> {n_valid}<br>
+                    <b>Observaciones del modelo:</b> {m2["n_obs"]:,}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        # ── Impacto de negocio ────────────────────────────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        section("💰 Impacto potencial de negocio — si implementas las recomendaciones")
+        st.caption("Estimación basada en la simulación del modelo. Asume que el cambio de precio se aplica "
+                   "a todos los SKUs con recomendación válida durante un mes.")
+
+        if len(results["sim"]) > 0 and len(df_m1a) > 0:
+            sim = results["sim"]
+
+            subir_skus = df_m1a[df_m1a["recomendacion"]=="Subir precio"]["prod_nbr"].tolist()
+            prom_skus  = df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"]["prod_nbr"].tolist()
+            mant_skus  = df_m1a[df_m1a["recomendacion"]=="Mantener precio"]["prod_nbr"].tolist()
+
+            def delta_ingreso(skus, escenario):
+                base = sim[(sim["prod_nbr"].isin(skus)) & (sim["cambio"]=="Base 0%")]["ingreso_est"].sum()
+                best = sim[(sim["prod_nbr"].isin(skus)) & (sim["cambio"]==escenario)]["ingreso_est"].sum()
+                return best - base
+
+            def delta_unidades(skus, escenario):
+                base = sim[(sim["prod_nbr"].isin(skus)) & (sim["cambio"]=="Base 0%")]["unidades_est"].sum()
+                best = sim[(sim["prod_nbr"].isin(skus)) & (sim["cambio"]==escenario)]["unidades_est"].sum()
+                return best - base
+
+            ing_subir  = delta_ingreso(subir_skus, "+10%")
+            ing_prom   = delta_ingreso(prom_skus,  "-10%")
+            uds_prom   = delta_unidades(prom_skus, "-10%")
+            ing_total  = ing_subir + ing_prom
+
+            ic1, ic2, ic3, ic4 = st.columns(4)
+            kpi(ic1, f"Ingreso extra subiendo {len(subir_skus)} SKUs (+10%)",
+                f"+${ing_subir:,.0f}/mes", OM_BLUE)
+            kpi(ic2, f"Ingreso extra promocionando {len(prom_skus)} SKUs (-10%)",
+                f"+${ing_prom:,.0f}/mes" if ing_prom > 0 else f"${ing_prom:,.0f}/mes",
+                OM_GREEN)
+            kpi(ic3, "Unidades adicionales estimadas (promos)",
+                f"+{uds_prom:,.0f}/mes", OM_AMBER)
+            kpi(ic4, "Impacto total anualizado",
+                f"+${ing_total*12:,.0f}/año", OM_RED)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.info("⚠️ Estas son estimaciones del modelo con los datos actuales. "
+                    "Con datos históricos más extensos de OfficeMax, la precisión aumenta significativamente.")
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CACHED DESCRIPTIVO AGGREGATIONS  (evita recalcular al mover filtros en Tab 3)
@@ -738,9 +847,10 @@ def compute_descriptivo(df_csv: bytes, dept_tuple, year_tuple, marca_tuple):
             .reset_index().sort_values("mes_calendario"))
     seas["mes_nombre"] = seas["mes_calendario"].map(MONTH_NAMES)
 
+    utilidad_total = pd.to_numeric(df.get("utilidad", pd.Series(dtype=float)), errors="coerce").sum()
     kpis = {"venta":df["venta_con_iva"].sum(),"unidades":df["qty"].sum(),
             "n_skus":df["prod_nbr"].nunique(),"n_stores":df["store_nbr"].nunique(),
-            "margen":df["margen"].mean()*100,
+            "margen":df["margen"].mean()*100,"margen_dinero":utilidad_total,
             "p95_p":df["precio_tx"].quantile(0.95),"p95_q":df["qty"].quantile(0.95)}
 
     dist_p  = df[df["precio_tx"]<=kpis["p95_p"]][["precio_tx"]].copy()
@@ -848,8 +958,8 @@ def generate_sku_narrative(sku_row, sku_sim, sku_cal):
 with tab2:
     # Filtros globales al inicio
     section("🔍 Filtros")
-    ff1, ff2, ff3 = st.columns(3)
-    raw_df = df_main  # reference only for filter options
+    ff1, ff2, ff3, ff4 = st.columns(4)
+    raw_df = df_main
     with ff1:
         all_depts = sorted(raw_df["dept_nm"].dropna().unique().tolist())
         dept_sel = st.multiselect("Departamento", all_depts, key="desc_dept")
@@ -862,10 +972,15 @@ with tab2:
             marca_sel = st.multiselect("Tipo de marca", all_marcas, key="desc_marca")
         else:
             marca_sel = []
+    with ff4:
+        prod_search = st.text_input("Buscar producto", placeholder="Nombre o SKU...", key="desc_prod")
 
     # Compute aggregations (cached — mismos bytes siempre → nunca re-corre)
     agg = compute_descriptivo(st.session_state["df_csv_bytes"],
                               tuple(dept_sel), tuple(year_sel), tuple(marca_sel))
+
+    # Filtro de producto (se aplica sobre los agregados, no requiere re-cache)
+    _prod_filter = prod_search.strip() if prod_search else ""
     if agg is None:
         st.warning("No hay datos con los filtros seleccionados.")
         st.stop()
@@ -873,12 +988,13 @@ with tab2:
 
     # KPIs
     section("📊 Indicadores clave")
-    kc = st.columns(5)
-    kpi(kc[0],"Venta total",      f"${kpis['venta']/1e6:.1f}M",   OM_RED)
-    kpi(kc[1],"Unidades vendidas",f"{kpis['unidades']/1e3:.0f}K", OM_BLUE)
-    kpi(kc[2],"SKUs únicos",      f"{kpis['n_skus']:,}",           OM_GREEN)
-    kpi(kc[3],"Tiendas",          f"{kpis['n_stores']}",           OM_AMBER)
-    kpi(kc[4],"Margen promedio",  f"{kpis['margen']:.1f}%",        "#7B1FA2")
+    kc = st.columns(6)
+    kpi(kc[0],"Venta total",       f"${kpis['venta']/1e6:.1f}M",            OM_RED)
+    kpi(kc[1],"Unidades vendidas", f"{kpis['unidades']/1e3:.0f}K",           OM_BLUE)
+    kpi(kc[2],"SKUs únicos",       f"{kpis['n_skus']:,}",                    OM_GREEN)
+    kpi(kc[3],"Tiendas",           f"{kpis['n_stores']}",                    OM_AMBER)
+    kpi(kc[4],"Margen promedio",   f"{kpis['margen']:.1f}%",                 "#7B1FA2")
+    kpi(kc[5],"Margen en dinero",  f"${kpis['margen_dinero']/1e3:.1f}K",    OM_GREEN)
     st.markdown("<br>", unsafe_allow_html=True)
 
     # Time series
@@ -942,8 +1058,13 @@ with tab2:
         st.plotly_chart(_layout(fig, h=380), use_container_width=True)
 
     # Top SKUs
-    section("🏆 Top 15 productos")
+    section("🏆 Top productos")
     top_sku = agg["top_sku"]
+    if _prod_filter:
+        top_sku = top_sku[top_sku["label"].str.contains(_prod_filter, case=False, na=False)]
+        if len(top_sku) == 0:
+            st.info(f"Sin productos que coincidan con '{_prod_filter}'")
+            top_sku = agg["top_sku"]  # fallback
     sk1,sk2 = st.columns(2)
     with sk1:
         fig = px.bar(top_sku.sort_values("venta"), x="venta", y="label", orientation="h",
@@ -1182,6 +1303,80 @@ with tab3:
     narrative = generate_narrative(df_m1a, m2, df_cal)
     st.markdown(f'<div class="narrative-box">{narrative.replace(chr(10), "<br>")}</div>',
                 unsafe_allow_html=True)
+
+    # ── Análisis con IA (Claude) ──────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    section("🤖 Análisis ejecutivo con Inteligencia Artificial")
+    st.caption("Genera un análisis detallado usando Claude de Anthropic. "
+               "Presiona el botón solo cuando lo necesites — cada llamada consume tokens.")
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        st.warning("⚠️ No hay API key configurada. Configura `ANTHROPIC_API_KEY` en las variables "
+                   "de entorno de Railway para habilitar esta función.")
+    else:
+        col_btn_ai, col_info_ai = st.columns([1, 3])
+        with col_btn_ai:
+            gen_ai = st.button("🤖 Generar análisis con IA", type="primary",
+                               help="Llama a Claude para generar un análisis ejecutivo basado en los resultados del modelo.")
+        with col_info_ai:
+            st.caption("El análisis tarda ~5-10 segundos y cuesta aproximadamente $0.01 USD por llamada.")
+
+        if gen_ai:
+            with st.spinner("Claude está analizando los resultados..."):
+                try:
+                    import anthropic
+                    client = anthropic.Anthropic(api_key=api_key)
+
+                    n_subir = len(df_m1a[df_m1a["recomendacion"]=="Subir precio"])
+                    n_prom  = len(df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"])
+                    n_mant  = len(df_m1a[df_m1a["recomendacion"]=="Mantener precio"])
+                    n_norec = len(df_m1a[df_m1a["recomendacion"]=="No recomendable"])
+
+                    top_subir = df_m1a[df_m1a["recomendacion"]=="Subir precio"].nsmallest(5,"pval")[["prod_nm","beta","r2","pval"]].to_string(index=False)
+                    top_prom  = df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"].nsmallest(5,"pval")[["prod_nm","beta","r2","pval"]].to_string(index=False)
+
+                    prompt = f"""Eres un consultor de revenue management para OfficeMax México.
+Analiza estos resultados de un modelo de elasticidad precio y escribe un reporte ejecutivo en español.
+
+RESULTADOS DEL MODELO:
+- Modelo global (Validación): R²={m2['r2']:.4f}, Beta={m2['beta']:.4f}, p-valor={m2['beta_pval']:.4f}, N={m2['n_obs']:,}
+- SKUs analizados: {len(df_m1a)} con modelo válido
+- SUBIR PRECIO (inelásticos, β entre 0 y -1): {n_subir} SKUs
+- MANTENER PRECIO (unitarios, β entre -1 y -1.5): {n_mant} SKUs
+- BAJAR/PROMOVER (elásticos, β < -1.5): {n_prom} SKUs
+- SIN RECOMENDACIÓN: {n_norec} SKUs (datos insuficientes o modelo no confiable)
+
+TOP CANDIDATOS PARA SUBIR PRECIO:
+{top_subir}
+
+TOP CANDIDATOS PARA PROMOVER:
+{top_prom}
+
+Escribe un reporte ejecutivo con estas secciones (máximo 250 palabras total):
+1. **Hallazgo principal** (1-2 oraciones sobre qué encontró el modelo)
+2. **Recomendaciones inmediatas** (qué hacer en los próximos 30 días)
+3. **Limitaciones y próximos pasos** (qué necesita OfficeMax para mejorar el análisis)
+
+Tono: profesional pero directo. Lenguaje de negocio, no técnico."""
+
+                    response = client.messages.create(
+                        model="claude-haiku-4-5-20251001",
+                        max_tokens=600,
+                        messages=[{"role":"user","content": prompt}]
+                    )
+                    ai_text = response.content[0].text
+                    st.session_state["ai_analysis"] = ai_text
+                except Exception as e:
+                    st.error(f"Error al llamar a Claude: {e}")
+
+        if st.session_state.get("ai_analysis"):
+            st.markdown(
+                f'<div class="narrative-box" style="border-left-color:#7B1FA2;">'
+                f'<div style="font-size:11px;color:#7B1FA2;font-weight:700;margin-bottom:8px;">ANÁLISIS GENERADO POR CLAUDE (Anthropic)</div>'
+                f'</div>',
+                unsafe_allow_html=True)
+            st.markdown(st.session_state["ai_analysis"])
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Conteo por recomendación ──────────────────────────────────────────────

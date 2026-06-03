@@ -847,7 +847,7 @@ def compute_descriptivo(df_csv: bytes, dept_tuple, year_tuple, marca_tuple):
             .reset_index().sort_values("mes_calendario"))
     seas["mes_nombre"] = seas["mes_calendario"].map(MONTH_NAMES)
 
-    utilidad_total = pd.to_numeric(df.get("utilidad", pd.Series(dtype=float)), errors="coerce").sum()
+    utilidad_total = pd.to_numeric(df["utilidad"] if "utilidad" in df.columns else pd.Series(dtype=float), errors="coerce").sum()
     kpis = {"venta":df["venta_con_iva"].sum(),"unidades":df["qty"].sum(),
             "n_skus":df["prod_nbr"].nunique(),"n_stores":df["store_nbr"].nunique(),
             "margen":df["margen"].mean()*100,"margen_dinero":utilidad_total,
@@ -1418,20 +1418,6 @@ Tono: profesional pero directo. Lenguaje de negocio, no técnico."""
             st.markdown(st.session_state["ai_analysis"])
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── Conteo por recomendación ──────────────────────────────────────────────
-    section("🎯 Resumen de recomendaciones")
-    rc = st.columns(4)
-    for i,(rec,color) in enumerate(REC_COLORS.items()):
-        cnt = rec_counts.get(rec,0); pct = cnt/len(df_m1a)*100
-        rc[i].markdown(
-            f'<div class="rec-card" style="border-left:6px solid {color};">'
-            f'<div style="font-size:38px;font-weight:900;color:{color};">{cnt}</div>'
-            f'<div style="font-weight:700;font-size:12px;color:#333;">{rec.upper()}</div>'
-            f'<div style="font-size:11px;color:#999;">{pct:.1f}% del total</div></div>',
-            unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
     # ── Calendario mensual de acciones ────────────────────────────────────────
     section("📅 ¿En qué meses actuar? — Calendario de acciones")
     st.caption(
@@ -1446,6 +1432,7 @@ Tono: profesional pero directo. Lenguaje de negocio, no técnico."""
         cal_dept_sel = st.selectbox("Filtrar por departamento (calendario)", ["Todos"] + cal_depts, key="cal_dept")
 
         # Aggregate: heatmap general (cuántos SKUs por mes x acción)
+        skus_dept = []  # inicializar siempre para evitar NameError
         cal_agg = (df_cal.groupby(["mes_cal","mes_nombre","accion"])
                    .agg(n_skus=("prod_nbr","nunique")).reset_index())
 

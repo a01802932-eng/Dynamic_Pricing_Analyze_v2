@@ -753,48 +753,6 @@ with tab1:
                 </div>
                 """, unsafe_allow_html=True)
 
-        # ── Impacto de negocio ────────────────────────────────────────────────
-        st.markdown("<br>", unsafe_allow_html=True)
-        section("💰 Impacto potencial de negocio — si implementas las recomendaciones")
-        st.caption("Estimación basada en la simulación del modelo. Asume que el cambio de precio se aplica "
-                   "a todos los SKUs con recomendación válida durante un mes.")
-
-        if len(results["sim"]) > 0 and len(df_m1a) > 0:
-            sim = results["sim"]
-
-            subir_skus = df_m1a[df_m1a["recomendacion"]=="Subir precio"]["prod_nbr"].tolist()
-            prom_skus  = df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"]["prod_nbr"].tolist()
-            mant_skus  = df_m1a[df_m1a["recomendacion"]=="Mantener precio"]["prod_nbr"].tolist()
-
-            def delta_ingreso(skus, escenario):
-                base = sim[(sim["prod_nbr"].isin(skus)) & (sim["cambio"]=="Base 0%")]["ingreso_est"].sum()
-                best = sim[(sim["prod_nbr"].isin(skus)) & (sim["cambio"]==escenario)]["ingreso_est"].sum()
-                return best - base
-
-            def delta_unidades(skus, escenario):
-                base = sim[(sim["prod_nbr"].isin(skus)) & (sim["cambio"]=="Base 0%")]["unidades_est"].sum()
-                best = sim[(sim["prod_nbr"].isin(skus)) & (sim["cambio"]==escenario)]["unidades_est"].sum()
-                return best - base
-
-            ing_subir  = delta_ingreso(subir_skus, "+10%")
-            ing_prom   = delta_ingreso(prom_skus,  "-10%")
-            uds_prom   = delta_unidades(prom_skus, "-10%")
-            ing_total  = ing_subir + ing_prom
-
-            ic1, ic2, ic3, ic4 = st.columns(4)
-            kpi(ic1, f"Ingreso extra subiendo {len(subir_skus)} SKUs (+10%)",
-                f"+${ing_subir:,.0f}/mes", OM_BLUE)
-            kpi(ic2, f"Ingreso extra promocionando {len(prom_skus)} SKUs (-10%)",
-                f"+${ing_prom:,.0f}/mes" if ing_prom > 0 else f"${ing_prom:,.0f}/mes",
-                OM_GREEN)
-            kpi(ic3, "Unidades adicionales estimadas (promos)",
-                f"+{uds_prom:,.0f}/mes", OM_AMBER)
-            kpi(ic4, "Impacto total anualizado",
-                f"+${ing_total*12:,.0f}/año", OM_RED)
-
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.info("⚠️ Estas son estimaciones del modelo con los datos actuales. "
-                    "Con datos históricos más extensos de OfficeMax, la precisión aumenta significativamente.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -973,14 +931,15 @@ with tab2:
         else:
             marca_sel = []
     with ff4:
-        prod_search = st.text_input("Buscar producto", placeholder="Nombre o SKU...", key="desc_prod")
+        _all_prods_opts = ["Todos"] + sorted(raw_df["prod_nm"].dropna().unique().tolist())
+        prod_sel = st.selectbox("Producto", _all_prods_opts, key="desc_prod")
 
     # Compute aggregations (cached — mismos bytes siempre → nunca re-corre)
     agg = compute_descriptivo(st.session_state["df_csv_bytes"],
                               tuple(dept_sel), tuple(year_sel), tuple(marca_sel))
 
     # Filtro de producto (se aplica sobre los agregados, no requiere re-cache)
-    _prod_filter = prod_search.strip() if prod_search else ""
+    _prod_filter = "" if prod_sel == "Todos" else prod_sel
     if agg is None:
         st.warning("No hay datos con los filtros seleccionados.")
         st.stop()
@@ -1217,6 +1176,74 @@ with tab3:
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
+    # ── Análisis ejecutivo con IA (siempre visible) ───────────────────────────
+    section("🤖 Análisis ejecutivo con Inteligencia Artificial")
+    st.caption("Genera un reporte ejecutivo usando Claude de Anthropic. "
+               "Presiona el botón solo cuando lo necesites — cada llamada consume tokens.")
+
+    _api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not _api_key:
+        st.warning("⚠️ No hay API key configurada. Configura `ANTHROPIC_API_KEY` en Railway para habilitar esta función.")
+    else:
+        _btn_col, _info_col = st.columns([1, 3])
+        with _btn_col:
+            _gen_ai = st.button("🤖 Generar análisis con IA", type="primary",
+                                help="Llama a Claude Haiku para generar un análisis ejecutivo.")
+        with _info_col:
+            st.caption("El análisis tarda ~5-10 segundos y cuesta aproximadamente $0.01 USD por llamada.")
+
+        if _gen_ai:
+            with st.spinner("Claude está analizando los resultados..."):
+                try:
+                    import anthropic as _anthropic
+                    _client = _anthropic.Anthropic(api_key=_api_key)
+                    _n_subir = len(df_m1a[df_m1a["recomendacion"]=="Subir precio"])
+                    _n_prom  = len(df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"])
+                    _n_mant  = len(df_m1a[df_m1a["recomendacion"]=="Mantener precio"])
+                    _n_norec = len(df_m1a[df_m1a["recomendacion"]=="No recomendable"])
+                    _top_sub = df_m1a[df_m1a["recomendacion"]=="Subir precio"].nsmallest(5,"pval")[["prod_nm","beta","r2","pval"]].to_string(index=False)
+                    _top_prm = df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"].nsmallest(5,"pval")[["prod_nm","beta","r2","pval"]].to_string(index=False)
+                    _prompt = f"""Eres un consultor de revenue management para OfficeMax México.
+Analiza estos resultados de un modelo de elasticidad precio y escribe un reporte ejecutivo en español.
+
+RESULTADOS DEL MODELO:
+- Modelo global: R²={m2['r2']:.4f}, Beta={m2['beta']:.4f}, p-valor={m2['beta_pval']:.4f}, N={m2['n_obs']:,}
+- SKUs analizados: {len(df_m1a)} con modelo válido
+- SUBIR PRECIO (inelásticos, β entre 0 y -1): {_n_subir} SKUs
+- MANTENER PRECIO (unitarios, β entre -1 y -1.5): {_n_mant} SKUs
+- BAJAR/PROMOVER (elásticos, β < -1.5): {_n_prom} SKUs
+- SIN RECOMENDACIÓN: {_n_norec} SKUs
+
+TOP CANDIDATOS PARA SUBIR PRECIO:
+{_top_sub}
+
+TOP CANDIDATOS PARA PROMOVER:
+{_top_prm}
+
+Escribe un reporte ejecutivo con estas secciones (máximo 250 palabras total):
+1. **Hallazgo principal** (1-2 oraciones sobre qué encontró el modelo)
+2. **Recomendaciones inmediatas** (qué hacer en los próximos 30 días)
+3. **Limitaciones y próximos pasos** (qué necesita OfficeMax para mejorar el análisis)
+
+Tono: profesional pero directo. Lenguaje de negocio, no técnico."""
+                    _resp = _client.messages.create(
+                        model="claude-haiku-4-5-20251001",
+                        max_tokens=600,
+                        messages=[{"role":"user","content":_prompt}])
+                    st.session_state["ai_analysis"] = _resp.content[0].text
+                except Exception as _e:
+                    st.error(f"Error al llamar a Claude: {_e}")
+
+        if st.session_state.get("ai_analysis"):
+            st.markdown(
+                '<div class="narrative-box" style="border-left-color:#7B1FA2;">'
+                '<div style="font-size:11px;color:#7B1FA2;font-weight:700;margin-bottom:8px;">'
+                'ANÁLISIS GENERADO POR CLAUDE (Anthropic)</div></div>',
+                unsafe_allow_html=True)
+            st.markdown(st.session_state["ai_analysis"])
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+
     # ── Selector: general o por producto ─────────────────────────────────────
     section("🔍 Análisis por producto")
     st.caption("Selecciona un producto para ver exactamente qué hacer con su precio y en qué meses. "
@@ -1336,87 +1363,6 @@ with tab3:
             st.plotly_chart(_layout(fig, h=320), use_container_width=True)
 
         st.stop()
-
-    # ── MODO GENERAL ──────────────────────────────────────────────────────────
-    section("📝 Resumen ejecutivo — ¿qué hacer?")
-    narrative = generate_narrative(df_m1a, m2, df_cal)
-    st.markdown(f'<div class="narrative-box">{narrative.replace(chr(10), "<br>")}</div>',
-                unsafe_allow_html=True)
-
-    # ── Análisis con IA (Claude) ──────────────────────────────────────────────
-    st.markdown("<br>", unsafe_allow_html=True)
-    section("🤖 Análisis ejecutivo con Inteligencia Artificial")
-    st.caption("Genera un análisis detallado usando Claude de Anthropic. "
-               "Presiona el botón solo cuando lo necesites — cada llamada consume tokens.")
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        st.warning("⚠️ No hay API key configurada. Configura `ANTHROPIC_API_KEY` en las variables "
-                   "de entorno de Railway para habilitar esta función.")
-    else:
-        col_btn_ai, col_info_ai = st.columns([1, 3])
-        with col_btn_ai:
-            gen_ai = st.button("🤖 Generar análisis con IA", type="primary",
-                               help="Llama a Claude para generar un análisis ejecutivo basado en los resultados del modelo.")
-        with col_info_ai:
-            st.caption("El análisis tarda ~5-10 segundos y cuesta aproximadamente $0.01 USD por llamada.")
-
-        if gen_ai:
-            with st.spinner("Claude está analizando los resultados..."):
-                try:
-                    import anthropic
-                    client = anthropic.Anthropic(api_key=api_key)
-
-                    n_subir = len(df_m1a[df_m1a["recomendacion"]=="Subir precio"])
-                    n_prom  = len(df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"])
-                    n_mant  = len(df_m1a[df_m1a["recomendacion"]=="Mantener precio"])
-                    n_norec = len(df_m1a[df_m1a["recomendacion"]=="No recomendable"])
-
-                    top_subir = df_m1a[df_m1a["recomendacion"]=="Subir precio"].nsmallest(5,"pval")[["prod_nm","beta","r2","pval"]].to_string(index=False)
-                    top_prom  = df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"].nsmallest(5,"pval")[["prod_nm","beta","r2","pval"]].to_string(index=False)
-
-                    prompt = f"""Eres un consultor de revenue management para OfficeMax México.
-Analiza estos resultados de un modelo de elasticidad precio y escribe un reporte ejecutivo en español.
-
-RESULTADOS DEL MODELO:
-- Modelo global (Validación): R²={m2['r2']:.4f}, Beta={m2['beta']:.4f}, p-valor={m2['beta_pval']:.4f}, N={m2['n_obs']:,}
-- SKUs analizados: {len(df_m1a)} con modelo válido
-- SUBIR PRECIO (inelásticos, β entre 0 y -1): {n_subir} SKUs
-- MANTENER PRECIO (unitarios, β entre -1 y -1.5): {n_mant} SKUs
-- BAJAR/PROMOVER (elásticos, β < -1.5): {n_prom} SKUs
-- SIN RECOMENDACIÓN: {n_norec} SKUs (datos insuficientes o modelo no confiable)
-
-TOP CANDIDATOS PARA SUBIR PRECIO:
-{top_subir}
-
-TOP CANDIDATOS PARA PROMOVER:
-{top_prom}
-
-Escribe un reporte ejecutivo con estas secciones (máximo 250 palabras total):
-1. **Hallazgo principal** (1-2 oraciones sobre qué encontró el modelo)
-2. **Recomendaciones inmediatas** (qué hacer en los próximos 30 días)
-3. **Limitaciones y próximos pasos** (qué necesita OfficeMax para mejorar el análisis)
-
-Tono: profesional pero directo. Lenguaje de negocio, no técnico."""
-
-                    response = client.messages.create(
-                        model="claude-haiku-4-5-20251001",
-                        max_tokens=600,
-                        messages=[{"role":"user","content": prompt}]
-                    )
-                    ai_text = response.content[0].text
-                    st.session_state["ai_analysis"] = ai_text
-                except Exception as e:
-                    st.error(f"Error al llamar a Claude: {e}")
-
-        if st.session_state.get("ai_analysis"):
-            st.markdown(
-                f'<div class="narrative-box" style="border-left-color:#7B1FA2;">'
-                f'<div style="font-size:11px;color:#7B1FA2;font-weight:700;margin-bottom:8px;">ANÁLISIS GENERADO POR CLAUDE (Anthropic)</div>'
-                f'</div>',
-                unsafe_allow_html=True)
-            st.markdown(st.session_state["ai_analysis"])
-    st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Calendario mensual de acciones ────────────────────────────────────────
     section("📅 ¿En qué meses actuar? — Calendario de acciones")
@@ -1680,7 +1626,51 @@ Tono: profesional pero directo. Lenguaje de negocio, no técnico."""
 
     # ── KPIs del modelo ───────────────────────────────────────────────────────
     section("📊 Métricas del análisis de Elasticidad Total")
-    sk1,sk2,sk3 = st.columns(3)
-    kpi(sk1,"Beta promedio",      f"{df_m1a['beta'].mean():.3f}", OM_BLUE)
-    kpi(sk2,"R² promedio",        f"{df_m1a['r2'].mean():.3f}",  OM_GREEN)
-    kpi(sk3,"RMSE promedio (log)",f"{df_m1a['rmse'].mean():.3f}" if 'rmse' in df_m1a.columns else "N/A", OM_AMBER)
+
+    kf1, kf2 = st.columns(2)
+    with kf1:
+        kpi_dept_f = st.multiselect("Filtrar por departamento",
+                                    sorted(df_m1a["dept_nm"].dropna().unique().tolist()),
+                                    key="kpi_dept_f")
+    with kf2:
+        kpi_rec_f = st.multiselect("Filtrar por recomendación",
+                                   list(REC_COLORS.keys()), key="kpi_rec_f")
+
+    kpi_df = df_m1a.copy()
+    if kpi_dept_f: kpi_df = kpi_df[kpi_df["dept_nm"].isin(kpi_dept_f)]
+    if kpi_rec_f:  kpi_df = kpi_df[kpi_df["recomendacion"].isin(kpi_rec_f)]
+
+    if len(kpi_df) == 0:
+        st.info("Sin datos con los filtros seleccionados.")
+    else:
+        n_kpi_tot   = len(kpi_df)
+        n_kpi_valid = len(kpi_df[kpi_df["recomendacion"] != "No recomendable"])
+        pct_valid   = n_kpi_valid / n_kpi_tot * 100 if n_kpi_tot > 0 else 0
+
+        sk1,sk2,sk3,sk4,sk5,sk6 = st.columns(6)
+        kpi(sk1, "SKUs en vista",      f"{n_kpi_tot:,}",                                                OM_BLUE)
+        kpi(sk2, "Con recomendación",  f"{n_kpi_valid} ({pct_valid:.0f}%)",                             OM_GREEN)
+        kpi(sk3, "Beta promedio",      f"{kpi_df['beta'].mean():.3f}",                                  OM_BLUE)
+        kpi(sk4, "R² promedio",        f"{kpi_df['r2'].mean():.3f}",                                    OM_GREEN)
+        kpi(sk5, "p-valor promedio",   f"{kpi_df['pval'].mean():.3f}",                                  OM_AMBER)
+        kpi(sk6, "RMSE promedio (log)",f"{kpi_df['rmse'].mean():.3f}" if 'rmse' in kpi_df.columns else "N/A", OM_RED)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        fig_sc = px.scatter(
+            kpi_df, x="beta", y="r2",
+            color="recomendacion", color_discrete_map=REC_COLORS,
+            size="n_meses", size_max=18,
+            hover_data={"prod_nm":True, "pval":":.4f", "n_meses":True, "beta":":.4f", "r2":":.4f"},
+            title="Calidad del modelo por SKU: Elasticidad (β) vs Ajuste (R²)",
+            labels={"beta":"Elasticidad (β)","r2":"Ajuste del modelo (R²)","recomendacion":"Recomendación",
+                    "n_meses":"Meses de datos"})
+        fig_sc.add_vline(x=-1,   line_dash="dash", line_color="gray", opacity=0.5,
+                         annotation_text="β=-1",   annotation_position="top right")
+        fig_sc.add_vline(x=-1.5, line_dash="dot",  line_color="gray", opacity=0.4,
+                         annotation_text="β=-1.5", annotation_position="top left")
+        fig_sc.add_hline(y=0.3,  line_dash="dash", line_color=OM_AMBER, opacity=0.4,
+                         annotation_text="R²=0.3")
+        fig_sc.update_traces(
+            hovertemplate="<b>%{customdata[0]}</b><br>β=%{x:.3f} · R²=%{y:.3f}<br>"
+                          "p=%{customdata[1]:.4f} · %{customdata[2]} meses<extra></extra>")
+        st.plotly_chart(_layout(fig_sc, h=400), use_container_width=True)

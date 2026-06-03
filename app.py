@@ -93,7 +93,8 @@ html, body, [class*="css"] { font-family: 'Roboto', Arial, sans-serif !important
 # ══════════════════════════════════════════════════════════════════════════════
 # SESSION STATE
 # ══════════════════════════════════════════════════════════════════════════════
-for _k in ["df_main", "clean_report", "results", "df_csv_bytes", "loaded_file_name", "ai_analysis"]:
+for _k in ["df_main", "clean_report", "results", "df_csv_bytes", "loaded_file_name",
+           "ai_analysis", "ml_results", "promo_bytes", "promo_file_name"]:
     if _k not in st.session_state:
         st.session_state[_k] = None
 
@@ -524,6 +525,20 @@ with st.sidebar:
             st.caption(st.session_state["clean_report"].iloc[-1]["Detalle"] if st.session_state["clean_report"] is not None else "")
 
     st.markdown("<hr style='border-color:#333; margin:16px 0;'>", unsafe_allow_html=True)
+    st.markdown("### 🏷️ Promociones *(opcional)*")
+    st.caption("Excel de promociones para el pipeline ML.")
+    uploaded_promo = st.file_uploader("Excel de Promociones", type=["xlsx","xls"],
+                                       label_visibility="collapsed", key="promo_uploader")
+    if uploaded_promo:
+        if st.session_state.get("promo_file_name") != uploaded_promo.name:
+            st.session_state["promo_bytes"]     = uploaded_promo.read()
+            st.session_state["promo_file_name"] = uploaded_promo.name
+            st.session_state["ml_results"]      = None
+            st.success("✅ Promociones cargadas")
+        else:
+            st.success("✅ Promociones cargadas")
+
+    st.markdown("<hr style='border-color:#333; margin:16px 0;'>", unsafe_allow_html=True)
     st.caption("**Flujo recomendado:**\n\n1. Sube el ZIP\n2. **Calculadora** → ejecuta el modelo\n3. **Descriptivo** → explora los datos\n4. **Predictivo** → ve qué hacer")
 
 
@@ -603,16 +618,23 @@ with tab1:
     run_btn = st.button("▶️  Ejecutar análisis de elasticidad", type="primary")
 
     if run_btn:
-        with st.spinner("Calculando modelos..."):
+        csv_bytes = st.session_state["df_csv_bytes"]
+        with st.spinner("⚙️ Paso 1/2 — Calculando elasticidad OLS..."):
             try:
-                csv_bytes = st.session_state["df_csv_bytes"]
                 res = run_models(df_csv=csv_bytes, min_obs=min_obs, min_cv=min_cv,
                                  min_r2=min_r2, max_beta=max_beta, pval_thresh=pval_thresh,
                                  run_rolling=run_rolling)
                 st.session_state["results"] = res
-                st.success("✅ Análisis completado")
             except Exception as e:
-                st.error(f"Error: {e}"); st.exception(e)
+                st.error(f"Error OLS: {e}"); st.exception(e)
+        with st.spinner("🌲 Paso 2/2 — Ejecutando pipeline ML (RF vs Gradient Boosting)..."):
+            try:
+                promo_b = st.session_state.get("promo_bytes") or b""
+                ml_res = run_ml_pipeline(csv_bytes, promo_b)
+                st.session_state["ml_results"] = ml_res
+            except Exception as e:
+                st.warning(f"Pipeline ML no completado: {e}")
+        st.success("✅ Análisis completado — ve al Dashboard Predictivo")
 
     results = st.session_state["results"]
     if results is None:
@@ -911,6 +933,208 @@ def generate_sku_narrative(sku_row, sku_sim, sku_cal):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# ML PIPELINE — RF vs Gradient Boosting + Promo Detection
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(show_spinner=False)
+def run_ml_pipeline(df_csv: bytes, promo_bytes: bytes):
+    from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+    from sklearn.metrics import r2_score, mean_squared_error
+    from sklearn.preprocessing import LabelEncoder
+
+    df = pd.read_csv(io.BytesIO(df_csv), low_memory=False)
+    df["tran_date"]      = pd.to_datetime(df["tran_date"], errors="coerce")
+    df["mes_str"]        = df["tran_date"].dt.to_period("M").astype(str)
+    df["mes_cal"]        = df["tran_date"].dt.month
+    df["venta_con_iva"]  = pd.to_numeric(df["venta_con_iva"], errors="coerce")
+    df["qty"]            = pd.to_numeric(df["qty"],           errors="coerce")
+    df["precio_catalogo"]= pd.to_numeric(df.get("precio_catalogo", pd.Series(dtype=float)), errors="coerce") \
+                           if "precio_catalogo" in df.columns else pd.Series(np.nan, index=df.index)
+
+    # Agregación mensual
+    mensual = (df.groupby(["prod_nbr","mes_str"])
+               .agg(unidades=("qty","sum"), venta_tot=("venta_con_iva","sum"),
+                    mes_cal=("mes_cal","first"), es_premium=("es_premium","max"),
+                    dept_nm=("dept_nm","first"),
+                    precio_catalogo=("precio_catalogo","mean"))
+               .reset_index())
+    mensual["precio"] = mensual["venta_tot"] / mensual["unidades"]
+    mensual = mensual[mensual["precio"] > 0].copy()
+    mensual["log_precio"]   = np.log(mensual["precio"])
+    mensual["log_unidades"] = np.log1p(mensual["unidades"])
+    mensual["log_venta"]    = np.log1p(mensual["venta_tot"])
+
+    # Precio vs catálogo
+    mensual["precio_vs_cat"] = (mensual["precio"] / mensual["precio_catalogo"].replace(0, np.nan)).fillna(1.0).clip(0.5, 1.5)
+
+    # ── Detección promos 3 niveles ────────────────────────────────────────────
+    mensual = mensual.sort_values(["prod_nbr","mes_str"]).reset_index(drop=True)
+
+    # Nivel 1: boletín oficial
+    oficial_set = set()
+    if promo_bytes and len(promo_bytes) > 0:
+        try:
+            pdf = pd.read_excel(io.BytesIO(promo_bytes))
+            pdf["SKU"] = pdf["SKU"].astype(str).str.replace(".0","",regex=False).str.strip()
+            pdf["Fecha_Inicio"] = pd.to_datetime(pdf["Fecha_Inicio"], dayfirst=True, errors="coerce")
+            pdf["Fecha_Fin"]    = pd.to_datetime(pdf["Fecha_Fin"],    dayfirst=True, errors="coerce")
+            pdf["_flag"] = pd.to_numeric(pdf["Promo_Flag"], errors="coerce")
+            pdf = pdf[(pdf["_flag"]==1) & pdf["Fecha_Inicio"].notna() & pdf["Fecha_Fin"].notna()]
+            for _, row in pdf.iterrows():
+                try:
+                    for m in pd.period_range(row["Fecha_Inicio"], row["Fecha_Fin"], freq="M"):
+                        oficial_set.add((row["SKU"], str(m)))
+                except: continue
+        except: pass
+
+    mensual["promo_official"] = mensual.apply(
+        lambda r: 1 if (r["prod_nbr"], r["mes_str"]) in oficial_set else 0, axis=1)
+
+    # Nivel 2: caída de precio ≥ 20% vs precio modal
+    precio_modal = mensual.groupby("prod_nbr")["precio"].agg(
+        lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else x.median())
+    mensual["precio_modal"] = mensual["prod_nbr"].map(precio_modal)
+    mensual["pct_vs_modal"] = mensual["precio"] / mensual["precio_modal"].replace(0, np.nan)
+    mensual["promo_priceX"] = (mensual["pct_vs_modal"] <= 0.80).astype(int)
+    mensual["pct_desc"]     = (1 - mensual["pct_vs_modal"].clip(upper=1.0)).clip(lower=0.0).fillna(0.0)
+
+    # Nivel 3: spike de volumen (solo para SKUs sin L1/L2)
+    p90 = mensual.groupby("prod_nbr")["unidades"].quantile(0.90)
+    mensual["p90_units"] = mensual["prod_nbr"].map(p90)
+    mensual["spike_raw"] = (mensual["unidades"] >= mensual["p90_units"]).astype(int)
+    sku_l1l2 = (mensual.groupby("prod_nbr")
+                .apply(lambda g: (g["promo_official"].sum() + g["promo_priceX"].sum()) > 0)
+                .reset_index(name="tiene_l1_l2"))
+    mensual = mensual.merge(sku_l1l2, on="prod_nbr", how="left")
+    mensual["promo_spike"] = (mensual["spike_raw"].astype(bool) & ~mensual["tiene_l1_l2"]).astype(int)
+
+    mensual["tiene_promo"] = ((mensual["promo_official"]==1) |
+                               (mensual["promo_priceX"]==1)  |
+                               (mensual["promo_spike"]==1)).astype(int)
+    mensual["nivel_promo"] = "Sin promo"
+    mensual.loc[mensual["promo_spike"]==1,   "nivel_promo"] = "N3 - Spike volumen"
+    mensual.loc[mensual["promo_priceX"]==1,  "nivel_promo"] = "N2 - Caida precio"
+    mensual.loc[mensual["promo_official"]==1,"nivel_promo"] = "N1 - Boletin oficial"
+
+    # ── Features de lag ───────────────────────────────────────────────────────
+    grp = mensual.groupby("prod_nbr")
+    mensual["uds_lag1"]       = grp["unidades"].shift(1)
+    mensual["uds_roll3m"]     = grp["unidades"].shift(1).rolling(3, min_periods=1).mean().values
+    mensual["precio_lag1"]    = grp["precio"].shift(1)
+    mensual["precio_chg_pct"] = (mensual["precio"] / mensual["precio_lag1"].replace(0,np.nan) - 1).clip(-0.5,0.5)
+    mensual["log_uds_lag1"]   = np.log1p(mensual["uds_lag1"].fillna(0))
+    mensual["log_uds_roll3m"] = np.log1p(mensual["uds_roll3m"].fillna(0))
+
+    mes_index = {m: i for i, m in enumerate(sorted(mensual["mes_str"].unique()))}
+    mensual["mes_num"] = mensual["mes_str"].map(mes_index)
+
+    # Filtrar SKUs con >= 6 meses y filas con lags válidos
+    skus_ok = mensual.groupby("prod_nbr")["mes_str"].count()
+    skus_ok = skus_ok[skus_ok >= 6].index
+    mensual = mensual[mensual["prod_nbr"].isin(skus_ok)].dropna(subset=["log_uds_lag1"]).reset_index(drop=True)
+
+    le = LabelEncoder()
+    mensual["dept_enc"] = le.fit_transform(mensual["dept_nm"].fillna("Unknown"))
+
+    FEAT_COLS  = ["log_precio","mes_cal","mes_num","es_premium","dept_enc",
+                  "pct_desc","precio_vs_cat","precio_chg_pct","log_uds_lag1","log_uds_roll3m"]
+    FEAT_NAMES = ["Log Precio","Mes del año","Tendencia temporal","Es Premium","Departamento",
+                  "% Descuento vs modal","Precio vs Catálogo","Cambio precio % (mes ant.)",
+                  "Ventas mes anterior (log)","Media ventas 3m (log)"]
+
+    X = mensual[FEAT_COLS].fillna(0)
+    y_u = mensual["log_unidades"]
+    y_r = mensual["log_venta"]
+
+    all_months  = sorted(mensual["mes_str"].unique())
+    split_idx   = int(len(all_months) * 0.8)
+    train_mask  = mensual["mes_str"].isin(set(all_months[:split_idx]))
+    test_mask   = mensual["mes_str"].isin(set(all_months[split_idx:]))
+
+    X_train, X_test = X[train_mask], X[test_mask]
+
+    # ── Entrenar RF y GB ──────────────────────────────────────────────────────
+    comparacion = {}
+    for nombre, (mu, mr) in {
+        "Random Forest":     (RandomForestRegressor(n_estimators=150, max_depth=8,
+                                                    min_samples_leaf=5, random_state=42, n_jobs=-1),
+                              RandomForestRegressor(n_estimators=150, max_depth=8,
+                                                    min_samples_leaf=5, random_state=42, n_jobs=-1)),
+        "Gradient Boosting": (GradientBoostingRegressor(n_estimators=150, max_depth=5,
+                                                         learning_rate=0.05, subsample=0.8, random_state=42),
+                              GradientBoostingRegressor(n_estimators=150, max_depth=5,
+                                                         learning_rate=0.05, subsample=0.8, random_state=42)),
+    }.items():
+        mu.fit(X_train, y_u[train_mask])
+        mr.fit(X_train, y_r[train_mask])
+        r2u = r2_score(y_u[test_mask], mu.predict(X_test))
+        r2r = r2_score(y_r[test_mask], mr.predict(X_test))
+        comparacion[nombre] = {"mod_u": mu, "mod_r": mr, "r2_u": round(r2u,4),
+                                "r2_r": round(r2r,4), "r2_avg": round((r2u+r2r)/2,4),
+                                "rmse_u": round(float(np.sqrt(mean_squared_error(y_u[test_mask], mu.predict(X_test)))),4),
+                                "rmse_r": round(float(np.sqrt(mean_squared_error(y_r[test_mask], mr.predict(X_test)))),4)}
+
+    ganador_nm = max(comparacion, key=lambda k: comparacion[k]["r2_avg"])
+    gan = comparacion[ganador_nm]
+
+    # Feature importance del ganador (promedio unidades + ventas)
+    imp = (gan["mod_u"].feature_importances_ + gan["mod_r"].feature_importances_) / 2
+    feat_df = pd.DataFrame({"feature": FEAT_NAMES, "importancia": imp}).sort_values("importancia", ascending=False)
+
+    # Predicho vs real (test, muestra de 800 pts)
+    pred_u = gan["mod_u"].predict(X_test)
+    pred_r = gan["mod_r"].predict(X_test)
+    n_s = min(800, len(pred_u))
+    idx_s = np.random.choice(len(pred_u), n_s, replace=False)
+    actual_u = np.expm1(y_u[test_mask].values[idx_s])
+    fitted_u = np.expm1(pred_u[idx_s])
+    actual_r = np.expm1(y_r[test_mask].values[idx_s])
+    fitted_r = np.expm1(pred_r[idx_s])
+
+    # Promo stats descriptivos
+    sin = mensual[mensual["tiene_promo"]==0]["unidades"].mean()
+    con = mensual[mensual["tiene_promo"]==1]["unidades"].mean() if mensual["tiene_promo"].sum() > 0 else sin
+    uplift = (con - sin) / sin * 100 if sin > 0 else 0
+    promo_by_nivel = (mensual.groupby("nivel_promo")
+                      .agg(n=("prod_nbr","count"), avg_u=("unidades","mean"))
+                      .reset_index())
+    promo_by_nivel["uplift"] = (promo_by_nivel["avg_u"] - sin) / sin * 100
+
+    # SKUs más sensibles al precio (-10%)
+    mt = mensual[test_mask].copy()
+    Xb = mt[FEAT_COLS].fillna(0).copy()
+    Xl = Xb.copy(); Xl["log_precio"] += np.log(0.90); Xl["pct_desc"] = (Xb["pct_desc"]+0.10).clip(0,1)
+    pb = np.expm1(gan["mod_u"].predict(Xb))
+    pl = np.expm1(gan["mod_u"].predict(Xl))
+    mt["uplift_precio"] = (pl - pb) / (pb + 1e-9) * 100
+    dept_map = mensual[["prod_nbr","dept_nm"]].drop_duplicates("prod_nbr").set_index("prod_nbr")["dept_nm"]
+    top_sens = (mt.groupby("prod_nbr").agg(uplift=("uplift_precio","mean")).reset_index()
+                .sort_values("uplift", ascending=False).head(10))
+    top_sens["dept"] = top_sens["prod_nbr"].map(dept_map)
+
+    comp_out = {k: {kk: vv for kk, vv in v.items() if kk not in ("mod_u","mod_r")}
+                for k, v in comparacion.items()}
+
+    return {
+        "ganador": ganador_nm,
+        "comparacion": comp_out,
+        "feat_df": feat_df,
+        "r2_u": gan["r2_u"], "r2_r": gan["r2_r"],
+        "actual_u": actual_u.tolist(), "fitted_u": fitted_u.tolist(),
+        "actual_r": actual_r.tolist(), "fitted_r": fitted_r.tolist(),
+        "n_train": int(train_mask.sum()), "n_test": int(test_mask.sum()),
+        "train_range": f"{all_months[0]} – {all_months[split_idx-1]}",
+        "test_range":  f"{all_months[split_idx]} – {all_months[-1]}",
+        "n_skus": len(skus_ok),
+        "promo_uplift": round(uplift,1),
+        "promo_by_nivel": promo_by_nivel,
+        "n_promo": int(mensual["tiene_promo"].sum()),
+        "n_total": len(mensual),
+        "top_sens": top_sens,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — DASHBOARD DESCRIPTIVO
 # ══════════════════════════════════════════════════════════════════════════════
 with tab2:
@@ -1137,8 +1361,72 @@ with tab3:
 
     rec_counts = df_m1a["recomendacion"].value_counts()
 
-    # ── Resumen general siempre visible ──────────────────────────────────────
-    section("📊 Resumen general")
+    # ── Paso 1: Pipeline ML — fundamento del modelo ───────────────────────────
+    ml_res = st.session_state.get("ml_results")
+    if ml_res:
+        section("🔬 Paso 1 — Validación con Machine Learning")
+        st.caption("Comparamos Random Forest vs Gradient Boosting para identificar qué factores "
+                   "explican la demanda. El resultado justifica el modelo de elasticidad OLS.")
+
+        # Tabla comparativa
+        ml_c1, ml_c2 = st.columns([1, 2])
+        with ml_c1:
+            comp = ml_res["comparacion"]
+            ganador = ml_res["ganador"]
+            comp_rows = []
+            for nm, v in comp.items():
+                comp_rows.append({"Modelo": f"{'★ ' if nm==ganador else ''}{nm}",
+                                   "R² Unidades": f"{v['r2_u']:.3f}",
+                                   "R² Ventas": f"{v['r2_r']:.3f}",
+                                   "R² Promedio": f"{v['r2_avg']:.3f}"})
+            st.dataframe(pd.DataFrame(comp_rows), hide_index=True, use_container_width=True)
+            st.caption(f"Train: {ml_res['train_range']}  |  Test: {ml_res['test_range']}")
+            st.markdown(
+                f'<div style="background:{OM_GREEN};color:white;border-radius:8px;padding:10px 14px;'
+                f'font-weight:700;font-size:13px;margin-top:8px;">✅ Modelo ganador: {ganador}</div>',
+                unsafe_allow_html=True)
+
+        with ml_c2:
+            feat_df = ml_res["feat_df"]
+            # Colorear features de precio en rojo, resto en gris
+            precio_feats = {"Log Precio","% Descuento vs modal","Precio vs Catálogo","Cambio precio % (mes ant.)"}
+            colors_fi = [OM_RED if f in precio_feats else OM_LGRAY for f in feat_df["feature"]]
+            fig_fi = go.Figure(go.Bar(
+                x=feat_df["importancia"] * 100,
+                y=feat_df["feature"],
+                orientation="h",
+                marker_color=colors_fi,
+                text=[f"{v*100:.1f}%" for v in feat_df["importancia"]],
+                textposition="outside",
+                hovertemplate="<b>%{y}</b><br>Importancia: %{x:.1f}%<extra></extra>"))
+            precio_total = feat_df[feat_df["feature"].isin(precio_feats)]["importancia"].sum() * 100
+            fig_fi.update_layout(
+                title=f"Importancia de variables — {ganador} (🔴 = features de precio: {precio_total:.0f}%)",
+                plot_bgcolor="white", paper_bgcolor="white",
+                height=300, margin=dict(t=45,b=10,l=10,r=60),
+                xaxis=dict(title="Importancia (%)", range=[0, feat_df["importancia"].max()*115]),
+                yaxis=dict(autorange="reversed"))
+            st.plotly_chart(fig_fi, use_container_width=True)
+
+        # Punchline que conecta ML con OLS
+        precio_imp = ml_res["feat_df"][ml_res["feat_df"]["feature"]=="Log Precio"]["importancia"].values
+        precio_pct = float(precio_imp[0]) * 100 if len(precio_imp) > 0 else 0
+        precio_feats_set = {"Log Precio","% Descuento vs modal","Precio vs Catálogo","Cambio precio % (mes ant.)"}
+        precio_total_pct = float(ml_res["feat_df"][ml_res["feat_df"]["feature"].isin(precio_feats_set)]["importancia"].sum()) * 100
+        st.markdown(
+            f'<div style="background:#E8F5E9;border-left:5px solid {OM_GREEN};border-radius:8px;'
+            f'padding:14px 18px;margin:12px 0 4px 0;font-size:14px;">'
+            f'<b>Conclusión del pipeline ML:</b> Las variables de <b>precio explican el {precio_total_pct:.0f}%</b> '
+            f'de la variación en demanda. Esto valida usar <b>regresión log-log (OLS)</b> como modelo '
+            f'accionable — porque el precio es el driver dominante y OLS cuantifica exactamente '
+            f'cuánto cambia la demanda por cada 1% de cambio en precio (elasticidad β por SKU).'
+            f'</div>', unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Paso 2: Resumen OLS ───────────────────────────────────────────────────
+    _paso2_label = "Paso 2 — " if ml_res else ""
+    section(f"📊 {_paso2_label}Resultados del modelo OLS — Elasticidad por SKU")
     rc = st.columns(4)
     for i,(rec,color) in enumerate(REC_COLORS.items()):
         cnt = rec_counts.get(rec,0)

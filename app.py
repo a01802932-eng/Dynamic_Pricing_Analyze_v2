@@ -757,37 +757,64 @@ def run_ml_pipeline(df_csv: bytes, promo_bytes: bytes):
     sku_mes["dept_nm"] = sku_mes["prod_nbr"].map(dept_map)
     sku_mes["mes_nombre"] = sku_mes["mes_cal"].map(MONTH_NAMES)
 
-    # ── Evaluación por SKU: ¿la promo funcionó? ──────────────────────────────
-    skus_promo = mensual[mensual["tiene_promo"]==1]["prod_nbr"].unique()
+    # ── Evaluación pre/durante/post por evento de promo (N2: caída >= 20%) ───
+    VENTANA = 2
+    all_months_ord = sorted(mensual["mes_str"].unique())
+    mes_idx_ev = {m: i for i, m in enumerate(all_months_ord)}
+    mensual["mes_num_ev"] = mensual["mes_str"].map(mes_idx_ev)
+    modal_p = mensual.groupby("prod_nbr")["precio"].agg(lambda x: x.mode().iloc[0] if len(x.mode())>0 else x.median())
+    mensual["caida_pct_ev"] = ((modal_p[mensual["prod_nbr"].values].values - mensual["precio"].values)
+                                / modal_p[mensual["prod_nbr"].values].values * 100)
+
+    # Detectar eventos: secuencias consecutivas de meses con caída >= 20%
+    eventos_ev = []
+    prod_nm_map = (mensual[["prod_nbr","prod_nm"]].drop_duplicates("prod_nbr")
+                   .set_index("prod_nbr")["prod_nm"]) if "prod_nm" in mensual.columns else {}
+    for sku, grp in mensual.groupby("prod_nbr"):
+        grp = grp.sort_values("mes_num_ev")
+        en_promo, meses_ev = False, []
+        for _, row in grp.iterrows():
+            if row["caida_pct_ev"] >= 20:
+                en_promo = True; meses_ev.append(int(row["mes_num_ev"]))
+            else:
+                if en_promo and meses_ev:
+                    eventos_ev.append({"prod_nbr":sku,"mes_i":min(meses_ev),"mes_f":max(meses_ev),
+                                       "desc_pct":grp[grp["mes_num_ev"].isin(meses_ev)]["caida_pct_ev"].mean()})
+                meses_ev = []; en_promo = False
+
     eval_rows = []
-    prod_nm_map = mensual[["prod_nbr","prod_nm"]].drop_duplicates("prod_nbr").set_index("prod_nbr")["prod_nm"] if "prod_nm" in mensual.columns else {}
-    for sku in skus_promo:
-        grp = mensual[mensual["prod_nbr"]==sku]
-        sin  = grp[grp["tiene_promo"]==0]
-        con  = grp[grp["tiene_promo"]==1]
-        if len(sin)==0 or len(con)==0: continue
-        uds_base  = sin["unidades"].mean()
-        uds_promo = con["unidades"].mean()
-        rev_base  = sin["venta_tot"].mean()
-        rev_promo = con["venta_tot"].mean()
-        p_base    = sin["precio"].mean()
-        p_promo   = con["precio"].mean()
-        if uds_base<=0 or p_base<=0: continue
-        uplift_uds = (uds_promo - uds_base) / uds_base * 100
-        uplift_rev = (rev_promo - rev_base)  / rev_base  * 100
-        pct_desc   = (p_base - p_promo) / p_base * 100
-        rentable   = uplift_rev > 0
+    for ev in eventos_ev:
+        sku = ev["prod_nbr"]
+        grp = mensual[mensual["prod_nbr"]==sku].set_index("mes_num_ev")
+        def _avg(meses, col):
+            vals = [grp.loc[m, col] for m in meses if m in grp.index]
+            return float(np.mean(vals)) if vals else np.nan
+        pre   = list(range(ev["mes_i"]-VENTANA, ev["mes_i"]))
+        dur   = list(range(ev["mes_i"], ev["mes_f"]+1))
+        post  = list(range(ev["mes_f"]+1, ev["mes_f"]+1+VENTANA))
+        u_pre = _avg(pre,"unidades"); u_dur = _avg(dur,"unidades"); u_post = _avg(post,"unidades")
+        r_pre = _avg(pre,"venta_tot"); r_dur = _avg(dur,"venta_tot")
+        if np.isnan(u_pre) or u_pre==0: continue
+        up_dur  = (u_dur  - u_pre) / u_pre * 100
+        up_post = (u_post - u_pre) / u_pre * 100 if not np.isnan(u_post) else np.nan
+        rv_up   = (r_dur  - r_pre) / r_pre * 100  if not np.isnan(r_dur)  else np.nan
+        if   np.isnan(up_post):  retencion = "Sin datos"
+        elif up_post >= 5:       retencion = "✅ Sostuvo"
+        elif up_post >= -5:      retencion = "➡️ Volvió a normal"
+        else:                    retencion = "❌ Cayó post-promo"
         eval_rows.append({
-            "prod_nbr":   sku,
-            "prod_nm":    str(prod_nm_map.get(sku, sku))[:40],
-            "dept_nm":    str(dept_map.get(sku, "—"))[:25],
-            "pct_desc":   round(pct_desc, 1),
-            "uplift_uds": round(uplift_uds, 1),
-            "uplift_rev": round(uplift_rev, 1),
-            "rentable":   "✅ Sí" if rentable else "❌ No",
-            "meses_promo":int(len(con)),
+            "prod_nm":  str(prod_nm_map.get(sku, sku))[:38],
+            "dept_nm":  str(dept_map.get(sku,"—"))[:22],
+            "desc_pct": round(ev["desc_pct"],1),
+            "uds_pre":  round(u_pre,1), "uds_dur": round(u_dur,1),
+            "uds_post": round(u_post,1) if not np.isnan(u_post) else None,
+            "up_dur":   round(up_dur,1),
+            "up_post":  round(up_post,1) if not np.isnan(up_post) else None,
+            "rv_up":    round(rv_up,1)   if not np.isnan(rv_up)   else None,
+            "rentable": "✅ Sí" if (rv_up is not None and rv_up>0) else "❌ No",
+            "retencion":retencion,
         })
-    promo_eval = pd.DataFrame(eval_rows).sort_values("uplift_uds", ascending=False) if eval_rows else pd.DataFrame()
+    promo_eval = pd.DataFrame(eval_rows).sort_values("up_dur", ascending=False) if eval_rows else pd.DataFrame()
 
     comp_out = {k:{kk:vv for kk,vv in v.items() if kk not in ("mod_u","mod_r")} for k,v in comparacion.items()}
     return {"ganador":ganador_nm,"comparacion":comp_out,"feat_df":feat_df,
@@ -1953,34 +1980,55 @@ with tab3:
                                    legend=dict(orientation="h",y=1.1))
                 st.plotly_chart(fig2, use_container_width=True)
 
-    # ── ¿La promoción funcionó? ───────────────────────────────────────────────
+    # ── ¿La promoción funcionó? (análisis pre/durante/post) ──────────────────
     _promo_eval = ml_res.get("promo_eval") if ml_res else None
     if _promo_eval is not None and len(_promo_eval) > 0:
         section("🏷️ ¿Las promociones funcionaron?")
-        st.caption("Comparación de ventas y unidades en meses con promoción detectada vs meses normales, por producto.")
+        st.caption("Análisis pre/durante/post por evento de promoción detectada (caída de precio ≥20%). "
+                   "Compara 2 meses antes, durante la promo y 2 meses después.")
 
-        pe1, pe2, pe3 = st.columns(3)
-        n_rent = (_promo_eval["rentable"]=="✅ Sí").sum()
-        n_nort = (_promo_eval["rentable"]=="❌ No").sum()
-        kpi(pe1, "Promos evaluadas",    f"{len(_promo_eval)} SKUs",         OM_BLUE)
-        kpi(pe2, "Generaron más ventas",f"{n_rent} ({n_rent/len(_promo_eval)*100:.0f}%)", OM_GREEN)
-        kpi(pe3, "No generaron más ventas", f"{n_nort}",                    OM_RED)
+        n_rent  = (_promo_eval["rentable"]=="✅ Sí").sum()
+        n_sost  = (_promo_eval["retencion"]=="✅ Sostuvo").sum()
+        n_cayo  = (_promo_eval["retencion"]=="❌ Cayó post-promo").sum()
+
+        pe1,pe2,pe3,pe4 = st.columns(4)
+        kpi(pe1,"Eventos evaluados",  f"{len(_promo_eval)}",                                  OM_BLUE)
+        kpi(pe2,"Generaron + ventas", f"{n_rent} ({n_rent/len(_promo_eval)*100:.0f}%)",       OM_GREEN)
+        kpi(pe3,"Sostuvieron demanda",f"{n_sost} ({n_sost/len(_promo_eval)*100:.0f}%)",       OM_AMBER)
+        kpi(pe4,"Cayeron post-promo", f"{n_cayo} ({n_cayo/len(_promo_eval)*100:.0f}%)",       OM_RED)
 
         st.markdown("<br>", unsafe_allow_html=True)
+        st.caption("**Verde** = más ventas en $ durante la promo y sostuvo después  |  "
+                   "**Amarillo** = subió durante pero volvió a normal  |  "
+                   "**Rojo** = cayó después de la promo (compraron solo por el descuento)")
 
-        show_eval = _promo_eval[["prod_nm","dept_nm","pct_desc","uplift_uds","uplift_rev","rentable","meses_promo"]].copy()
-        show_eval.columns = ["Producto","Departamento","Descuento %","Uplift Unidades %","Uplift Ventas $%","¿Generó ventas?","Meses en promo"]
+        show_eval = _promo_eval[[
+            "prod_nm","dept_nm","desc_pct",
+            "uds_pre","uds_dur","uds_post",
+            "up_dur","up_post","rv_up",
+            "rentable","retencion"
+        ]].copy()
+        show_eval.columns = [
+            "Producto","Departamento","Descuento %",
+            "Uds ANTES","Uds DURANTE","Uds DESPUÉS",
+            "Uplift uds %","Post-promo %","Uplift ventas %",
+            "¿Rentable?","¿Sostuvo demanda?"
+        ]
 
-        def _color_row(row):
-            color = "#E8F5E9" if row["¿Generó ventas?"]=="✅ Sí" else "#FFEBEE"
-            return [f"background-color:{color}"]*len(row)
+        def _color_promo(row):
+            if row["¿Rentable?"]=="✅ Sí" and row["¿Sostuvo demanda?"]=="✅ Sostuvo":
+                c = "#E8F5E9"
+            elif row["¿Sostuvo demanda?"]=="❌ Cayó post-promo":
+                c = "#FFEBEE"
+            else:
+                c = "#FFF9C4"
+            return [f"background-color:{c}"]*len(row)
 
+        fmt = {"Descuento %":"{:.1f}%","Uplift uds %":"{:+.1f}%",
+               "Uplift ventas %":"{:+.1f}%"}
         st.dataframe(
-            show_eval.style.apply(_color_row, axis=1)
-                     .format({"Descuento %":"{:.1f}%","Uplift Unidades %":"{:+.1f}%","Uplift Ventas $%":"{:+.1f}%"}),
-            use_container_width=True, height=300, hide_index=True)
-
-        st.caption("Verde = la promo generó más ventas en $ (aunque sea poco). Rojo = las ventas bajaron o no cambiaron.")
+            show_eval.style.apply(_color_promo, axis=1).format(fmt, na_rep="—"),
+            use_container_width=True, height=320, hide_index=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Resumen ejecutivo con IA — sintetiza todo el analisis ────────────────

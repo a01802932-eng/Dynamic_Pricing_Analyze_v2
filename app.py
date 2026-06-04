@@ -1589,186 +1589,6 @@ with tab3:
                           margin=dict(t=40,b=10,l=10,r=10))
         st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("<hr>", unsafe_allow_html=True)
-
-    # ── Análisis ejecutivo con IA (siempre visible) ───────────────────────────
-    section("🤖 Análisis ejecutivo con Inteligencia Artificial")
-    st.caption("Genera un reporte ejecutivo usando Claude de Anthropic. "
-               "Presiona el botón solo cuando lo necesites — cada llamada consume tokens.")
-
-    _api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not _api_key:
-        st.warning("⚠️ No hay API key configurada. Configura `ANTHROPIC_API_KEY` en Railway para habilitar esta función.")
-    else:
-        _btn_col, _info_col = st.columns([1, 3])
-        with _btn_col:
-            _gen_ai = st.button("🤖 Generar análisis con IA", type="primary",
-                                help="Llama a Claude Haiku para generar un análisis ejecutivo.")
-        with _info_col:
-            st.caption("El análisis tarda ~5-10 segundos y cuesta aproximadamente $0.01 USD por llamada.")
-
-        if _gen_ai:
-            with st.spinner("Claude está analizando los resultados..."):
-                try:
-                    import anthropic as _anthropic
-                    _client = _anthropic.Anthropic(api_key=_api_key)
-
-                    # ── Conteos por recomendación ──────────────────────────────
-                    _n_subir = len(df_m1a[df_m1a["recomendacion"]=="Subir precio"])
-                    _n_prom  = len(df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"])
-                    _n_mant  = len(df_m1a[df_m1a["recomendacion"]=="Mantener precio"])
-                    _n_norec = len(df_m1a[df_m1a["recomendacion"]=="No recomendable"])
-
-                    # ── Top candidatos con impacto simulado ────────────────────
-                    def _build_candidate_table(rec_label, escenario, top_n=8):
-                        pool = df_m1a[df_m1a["recomendacion"]==rec_label].nsmallest(top_n, "pval")
-                        rows = []
-                        for _, r in pool.iterrows():
-                            sim_r = df_sim[(df_sim["prod_nm"]==r["prod_nm"]) & (df_sim["cambio"]==escenario)]
-                            base_r = df_sim[(df_sim["prod_nm"]==r["prod_nm"]) & (df_sim["cambio"]=="Base 0%")]
-                            if len(sim_r) > 0 and len(base_r) > 0:
-                                delta_rev = sim_r.iloc[0]["ingreso_est"] - base_r.iloc[0]["ingreso_est"]
-                                delta_pct = sim_r.iloc[0]["delta_ingreso_pct"]
-                                rows.append(
-                                    f"  • {r['prod_nm'][:45]} | Depto: {str(r.get('dept_nm',''))[:20]} | "
-                                    f"β={r['beta']:.2f} | R²={r['r2']:.2f} | p={r['pval']:.3f} | "
-                                    f"Δingreso {escenario}: {delta_pct:+.1f}% (${delta_rev:+,.0f}/mes)")
-                            else:
-                                rows.append(
-                                    f"  • {r['prod_nm'][:45]} | Depto: {str(r.get('dept_nm',''))[:20]} | "
-                                    f"β={r['beta']:.2f} | R²={r['r2']:.2f} | p={r['pval']:.3f}")
-                        return "\n".join(rows) if rows else "  (ninguno)"
-
-                    _cand_subir = _build_candidate_table("Subir precio",     "+10%")
-                    _cand_mant  = _build_candidate_table("Mantener precio",  "Base 0%", top_n=5)
-                    _cand_prom  = _build_candidate_table("Bajar / Promover", "-10%")
-
-                    # ── Resumen por departamento ───────────────────────────────
-                    _dept_summary = ""
-                    if "dept_nm" in df_m1a.columns:
-                        _dg = (df_m1a.groupby(["dept_nm","recomendacion"])
-                               .size().unstack(fill_value=0).reset_index())
-                        _dept_summary = "DISTRIBUCIÓN POR DEPARTAMENTO:\n"
-                        for _, dr in _dg.iterrows():
-                            _dept_summary += f"  {str(dr['dept_nm'])[:30]}: "
-                            for rec in ["Subir precio","Mantener precio","Bajar / Promover","No recomendable"]:
-                                if rec in dr.index and dr[rec] > 0:
-                                    _dept_summary += f"{rec}={int(dr[rec])} "
-                            _dept_summary += "\n"
-
-                    # ── Mejores meses globales ─────────────────────────────────
-                    _cal_summary = ""
-                    if len(df_cal) > 0:
-                        _ms_subir = df_cal[df_cal["accion"]=="SUBIR"]["mes_nombre"].value_counts().head(3).index.tolist()
-                        _ms_prom  = df_cal[df_cal["accion"]=="PROMOVER"]["mes_nombre"].value_counts().head(3).index.tolist()
-                        _cal_summary = (f"ESTACIONALIDAD ÓPTIMA:\n"
-                                        f"  Meses con más SKUs para SUBIR precio: {', '.join(_ms_subir) or 'N/A'}\n"
-                                        f"  Meses con más SKUs para PROMOVER: {', '.join(_ms_prom) or 'N/A'}")
-
-                    # ── Impacto financiero agregado ────────────────────────────
-                    _fin_summary = ""
-                    if len(df_sim) > 0:
-                        def _total_delta(recs, esc):
-                            skus = df_m1a[df_m1a["recomendacion"].isin(recs)]["prod_nm"].tolist()
-                            base = df_sim[(df_sim["prod_nm"].isin(skus)) & (df_sim["cambio"]=="Base 0%")]["ingreso_est"].sum()
-                            best = df_sim[(df_sim["prod_nm"].isin(skus)) & (df_sim["cambio"]==esc)]["ingreso_est"].sum()
-                            return best - base
-                        _d_sub = _total_delta(["Subir precio"], "+10%")
-                        _d_prm = _total_delta(["Bajar / Promover"], "-10%")
-                        _fin_summary = (f"IMPACTO FINANCIERO ESTIMADO (si se aplican las recomendaciones):\n"
-                                        f"  Subir precio en {_n_subir} SKUs inelásticos (+10%): ${_d_sub:+,.0f}/mes\n"
-                                        f"  Activar promos en {_n_prom} SKUs elásticos (-10%): ${_d_prm:+,.0f}/mes\n"
-                                        f"  Total combinado mensual: ${(_d_sub+_d_prm):+,.0f}/mes")
-
-                    # Métricas M1A para el prompt (más representativas que M2 global)
-                    _validos_df  = df_m1a[df_m1a["recomendacion"]!="No recomendable"]
-                    _r2_validos  = float(_validos_df["r2"].mean()) if len(_validos_df)>0 else 0
-                    _beta_median = float(df_m1a["beta"].median())
-                    _pct_sig     = float((df_m1a["pval"]<0.10).mean()*100)
-                    _ml_r2_str   = f"{st.session_state['ml_results']['r2_r']:.3f}" if st.session_state.get("ml_results") else "N/A"
-                    _ml_ganador  = st.session_state["ml_results"]["ganador"] if st.session_state.get("ml_results") else "ML"
-
-                    _prompt = f"""Eres un consultor senior de revenue management para OfficeMax México.
-Analiza los resultados detallados del modelo de elasticidad precio y escribe un reporte ejecutivo accionable en español.
-
-══════════════════════════════════════
-PIPELINE DE MODELOS
-══════════════════════════════════════
-PASO 1 — Machine Learning ({_ml_ganador}):
-  R² predicción de ventas = {_ml_r2_str} (modelo predictivo con precio, historial y temporada)
-  El precio es el FACTOR DE NEGOCIO MÁS IMPORTANTE CONTROLABLE (~58% de importancia en el ML)
-  Esto valida usar OLS para cuantificar la elasticidad específica por producto.
-
-PASO 2 — OLS log-log por SKU (modelo de elasticidad):
-  SKUs analizados: {len(df_m1a)} | Con recomendación válida: {len(_validos_df)}
-  R² promedio (SKUs válidos): {_r2_validos:.3f}
-  NOTA: El OLS tiene R² moderado porque solo usa precio como variable — su valor está en dar
-  el coeficiente β que cuantifica exactamente cuánto cambia la demanda ante un cambio de precio.
-  Beta mediana: {_beta_median:.3f} | % SKUs estadísticamente significativos: {_pct_sig:.1f}%
-
-══════════════════════════════════════
-DISTRIBUCIÓN DE RECOMENDACIONES
-══════════════════════════════════════
-Total SKUs con modelo: {len(df_m1a)}
-• SUBIR PRECIO  (β entre 0 y -1, inelásticos):    {_n_subir} SKUs ({_n_subir/len(df_m1a)*100:.1f}%)
-• MANTENER       (β entre -1 y -1.5, unitarios):  {_n_mant} SKUs ({_n_mant/len(df_m1a)*100:.1f}%)
-• BAJAR/PROMOVER (β < -1.5, elásticos):            {_n_prom} SKUs ({_n_prom/len(df_m1a)*100:.1f}%)
-• SIN RECOMENDACIÓN (estadística insuficiente):    {_n_norec} SKUs ({_n_norec/len(df_m1a)*100:.1f}%)
-
-{_dept_summary}
-══════════════════════════════════════
-CANDIDATOS PARA SUBIR PRECIO (inelásticos — subir no aleja clientes)
-══════════════════════════════════════
-{_cand_subir}
-
-══════════════════════════════════════
-CANDIDATOS PARA MANTENER PRECIO
-══════════════════════════════════════
-{_cand_mant}
-
-══════════════════════════════════════
-CANDIDATOS PARA PROMOVER / BAJAR PRECIO (elásticos — bajar genera más volumen)
-══════════════════════════════════════
-{_cand_prom}
-
-{_cal_summary}
-
-{_fin_summary}
-
-══════════════════════════════════════
-INSTRUCCIONES PARA EL REPORTE
-══════════════════════════════════════
-Escribe un reporte ejecutivo con las siguientes secciones. Sé específico: menciona nombres reales de productos, departamentos, cifras concretas del modelo. No digas cosas genéricas como "hay oportunidades de mejora".
-
-1. **🔍 Hallazgo principal** (2-3 oraciones): qué patrón de elasticidad domina en el catálogo y qué significa para OfficeMax.
-
-2. **🔵 Acción inmediata — Subir precio** (3-5 bullets): nombra los productos/departamentos prioritarios, qué beta tienen, qué impacto estimado en ingreso. Explica por qué son inelásticos en términos de negocio.
-
-3. **🟢 Acción inmediata — Activar promociones** (3-5 bullets): nombra los productos/departamentos prioritarios, qué ganancia en volumen se espera, en qué meses conviene más según la estacionalidad.
-
-4. **📅 Timing recomendado**: cuándo ejecutar cada acción basándote en los datos de estacionalidad.
-
-5. **⚠️ Limitaciones y próximos pasos** (2-3 bullets): qué datos adicionales harían el modelo más preciso, qué productos necesitan más historial.
-
-Tono: directo, ejecutivo, orientado a acción. Máximo 400 palabras."""
-
-                    _resp = _client.messages.create(
-                        model="claude-haiku-4-5-20251001",
-                        max_tokens=1000,
-                        messages=[{"role":"user","content":_prompt}])
-                    st.session_state["ai_analysis"] = _resp.content[0].text
-                except Exception as _e:
-                    st.error(f"Error al llamar a Claude: {_e}")
-
-        if st.session_state.get("ai_analysis"):
-            st.markdown(
-                '<div class="narrative-box" style="border-left-color:#7B1FA2;">'
-                '<div style="font-size:11px;color:#7B1FA2;font-weight:700;margin-bottom:8px;">'
-                'ANÁLISIS GENERADO POR CLAUDE (Anthropic)</div></div>',
-                unsafe_allow_html=True)
-            st.markdown(st.session_state["ai_analysis"])
-
-    st.markdown("<hr>", unsafe_allow_html=True)
 
     # ── Selector: general o por producto ─────────────────────────────────────
     section("🔍 Análisis por producto")
@@ -2101,110 +1921,102 @@ Tono: directo, ejecutivo, orientado a acción. Máximo 400 palabras."""
                                    legend=dict(orientation="h",y=1.1))
                 st.plotly_chart(fig2, use_container_width=True)
 
-    # ── Beta distribution ─────────────────────────────────────────────────────
-    # ── Rolling beta ──────────────────────────────────────────────────────────
-    has_rolling = len(df_m1b)>0 or len(df_m1c)>0
-    if has_rolling:
-        section("📉 Tendencia de la elasticidad en el tiempo")
-        roll_pool = set()
-        if len(df_m1b)>0: roll_pool|=set(df_m1b["prod_nm"].unique())
-        if len(df_m1c)>0: roll_pool|=set(df_m1c["prod_nm"].unique())
-        roll_sel=st.selectbox("Producto",sorted(roll_pool),key="roll_sel")
-        fig3=go.Figure()
-        if len(df_m1b)>0:
-            d3=df_m1b[df_m1b["prod_nm"]==roll_sel].sort_values("mes_fin_dt")
-            if len(d3)>0:
-                fig3.add_trace(go.Scatter(x=d3["mes_fin_dt"],y=d3["beta"],
-                                          mode="lines+markers",name="Trimestral (3m)",
-                                          line=dict(color=OM_BLUE,width=2.2),marker=dict(size=6)))
-        if len(df_m1c)>0:
-            d6=df_m1c[df_m1c["prod_nm"]==roll_sel].sort_values("mes_fin_dt")
-            if len(d6)>0:
-                fig3.add_trace(go.Scatter(x=d6["mes_fin_dt"],y=d6["beta"],
-                                          mode="lines+markers",name="Semestral (6m)",
-                                          line=dict(color=OM_RED,width=2.2),marker=dict(size=6,symbol="square")))
-        b_glob=df_m1a.loc[df_m1a["prod_nm"]==roll_sel,"beta"]
-        if len(b_glob)>0:
-            fig3.add_hline(y=b_glob.iloc[0],line_dash="dot",line_color=OM_GREEN,
-                           annotation_text=f"Beta global = {b_glob.iloc[0]:.2f}")
-        fig3.add_hline(y=-1,line_dash="dash",line_color="gray",opacity=0.5,annotation_text="β=-1")
-        fig3.add_hline(y=-1.5,line_dash="dot",line_color="gray",opacity=0.35,annotation_text="β=-1.5")
-        fig3.update_layout(title=f"Elasticidad rolling — {roll_sel[:50]}",
-                           plot_bgcolor="white",paper_bgcolor="white",
-                           height=360,margin=dict(t=55,b=20,l=20,r=20),
-                           xaxis_title="Mes",yaxis_title="Beta",
-                           legend=dict(orientation="h",y=1.1))
-        st.plotly_chart(fig3, use_container_width=True)
+    # ── Resumen ejecutivo con IA — sintetiza todo el analisis ────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    section("🤖 Resumen ejecutivo con IA")
+    st.caption(
+        "Claude genera un reporte integrado: pipeline ML, elasticidades OLS, "
+        "impacto financiero y timing optimo. Presiona despues de revisar todo lo anterior.")
 
-    # ── Candidate tables ──────────────────────────────────────────────────────
-    section("📋 Lista de candidatos por acción")
-    ct1,ct2 = st.columns(2)
-    with ct1:
-        st.markdown("**🔵 Subir precio** — beta entre 0 y -1 (inelásticos)")
-        sub_up=df_m1a[df_m1a["recomendacion"]=="Subir precio"].sort_values("beta",ascending=False)
-        if len(sub_up)>0:
-            st.dataframe(sub_up[["prod_nm","dept_nm","beta","r2","pval","n_meses"]]
-                         .rename(columns={"prod_nm":"Producto","dept_nm":"Depto",
-                                           "beta":"Beta","r2":"R²","pval":"p-valor","n_meses":"Meses"})
-                         .head(12),hide_index=True,use_container_width=True,height=320)
-        else: st.info("Sin candidatos con los parámetros actuales.")
-    with ct2:
-        st.markdown("**🟢 Bajar / Promover** — beta < -1.5 (elásticos)")
-        sub_dn=df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"].sort_values("beta")
-        if len(sub_dn)>0:
-            st.dataframe(sub_dn[["prod_nm","dept_nm","beta","r2","pval","n_meses"]]
-                         .rename(columns={"prod_nm":"Producto","dept_nm":"Depto",
-                                           "beta":"Beta","r2":"R²","pval":"p-valor","n_meses":"Meses"})
-                         .head(12),hide_index=True,use_container_width=True,height=320)
-        else: st.info("Sin candidatos con los parámetros actuales.")
-
-    # ── KPIs del modelo ───────────────────────────────────────────────────────
-    section("📊 Métricas del análisis de Elasticidad Total")
-
-    kf1, kf2 = st.columns(2)
-    with kf1:
-        kpi_dept_f = st.multiselect("Filtrar por departamento",
-                                    sorted(df_m1a["dept_nm"].dropna().unique().tolist()),
-                                    key="kpi_dept_f")
-    with kf2:
-        kpi_rec_f = st.multiselect("Filtrar por recomendación",
-                                   list(REC_COLORS.keys()), key="kpi_rec_f")
-
-    kpi_df = df_m1a.copy()
-    if kpi_dept_f: kpi_df = kpi_df[kpi_df["dept_nm"].isin(kpi_dept_f)]
-    if kpi_rec_f:  kpi_df = kpi_df[kpi_df["recomendacion"].isin(kpi_rec_f)]
-
-    if len(kpi_df) == 0:
-        st.info("Sin datos con los filtros seleccionados.")
+    _api_key2 = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not _api_key2:
+        st.warning("Configura ANTHROPIC_API_KEY en Railway para habilitar esta funcion.")
     else:
-        n_kpi_tot   = len(kpi_df)
-        n_kpi_valid = len(kpi_df[kpi_df["recomendacion"] != "No recomendable"])
-        pct_valid   = n_kpi_valid / n_kpi_tot * 100 if n_kpi_tot > 0 else 0
+        _bc2, _ic2 = st.columns([1, 3])
+        with _bc2:
+            _gen_ai2 = st.button("🤖 Generar resumen ejecutivo", type="primary", key="claude_bottom")
+        with _ic2:
+            st.caption("~10 segundos · integra ML + OLS + impacto + timing")
 
-        sk1,sk2,sk3,sk4,sk5,sk6 = st.columns(6)
-        kpi(sk1, "SKUs en vista",      f"{n_kpi_tot:,}",                                                OM_BLUE)
-        kpi(sk2, "Con recomendación",  f"{n_kpi_valid} ({pct_valid:.0f}%)",                             OM_GREEN)
-        kpi(sk3, "Beta promedio",      f"{kpi_df['beta'].mean():.3f}",                                  OM_BLUE)
-        kpi(sk4, "R² promedio",        f"{kpi_df['r2'].mean():.3f}",                                    OM_GREEN)
-        kpi(sk5, "p-valor promedio",   f"{kpi_df['pval'].mean():.3f}",                                  OM_AMBER)
-        kpi(sk6, "RMSE promedio (log)",f"{kpi_df['rmse'].mean():.3f}" if 'rmse' in kpi_df.columns else "N/A", OM_RED)
+        if _gen_ai2:
+            with st.spinner("Claude sintetizando el analisis completo..."):
+                try:
+                    import anthropic as _anth2
+                    _cli2 = _anth2.Anthropic(api_key=_api_key2)
+                    _ns2  = len(df_m1a[df_m1a["recomendacion"]=="Subir precio"])
+                    _np2  = len(df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"])
+                    _nm2  = len(df_m1a[df_m1a["recomendacion"]=="Mantener precio"])
+                    _nn2  = len(df_m1a[df_m1a["recomendacion"]=="No recomendable"])
+                    _vdf2 = df_m1a[df_m1a["recomendacion"]!="No recomendable"]
+                    _r2v2 = float(_vdf2["r2"].mean()) if len(_vdf2)>0 else 0
+                    _bmd2 = float(df_m1a["beta"].median())
+                    _psg2 = float((df_m1a["pval"]<0.10).mean()*100)
+                    _mlr2 = st.session_state["ml_results"]["r2_r"] if st.session_state.get("ml_results") else 0
+                    _mlg2 = st.session_state["ml_results"]["ganador"] if st.session_state.get("ml_results") else "ML"
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        fig_sc = px.scatter(
-            kpi_df, x="beta", y="r2",
-            color="recomendacion", color_discrete_map=REC_COLORS,
-            size="n_meses", size_max=18,
-            hover_data={"prod_nm":True, "pval":":.4f", "n_meses":True, "beta":":.4f", "r2":":.4f"},
-            title="Calidad del modelo por SKU: Elasticidad (β) vs Ajuste (R²)",
-            labels={"beta":"Elasticidad (β)","r2":"Ajuste del modelo (R²)","recomendacion":"Recomendación",
-                    "n_meses":"Meses de datos"})
-        fig_sc.add_vline(x=-1,   line_dash="dash", line_color="gray", opacity=0.5,
-                         annotation_text="β=-1",   annotation_position="top right")
-        fig_sc.add_vline(x=-1.5, line_dash="dot",  line_color="gray", opacity=0.4,
-                         annotation_text="β=-1.5", annotation_position="top left")
-        fig_sc.add_hline(y=0.3,  line_dash="dash", line_color=OM_AMBER, opacity=0.4,
-                         annotation_text="R²=0.3")
-        fig_sc.update_traces(
-            hovertemplate="<b>%{customdata[0]}</b><br>β=%{x:.3f} · R²=%{y:.3f}<br>"
-                          "p=%{customdata[1]:.4f} · %{customdata[2]} meses<extra></extra>")
-        st.plotly_chart(_layout(fig_sc, h=400), use_container_width=True)
+                    def _ct2(rec2, esc2, n2=6):
+                        pool2 = df_m1a[df_m1a["recomendacion"]==rec2].nsmallest(n2,"pval")
+                        rows2 = []
+                        for _, r2 in pool2.iterrows():
+                            sr2 = df_sim[(df_sim["prod_nm"]==r2["prod_nm"])&(df_sim["cambio"]==esc2)]
+                            d2 = f" | delta={sr2.iloc[0]['delta_ingreso_pct']:+.1f}%" if len(sr2)>0 else ""
+                            rows2.append(f"  * {r2['prod_nm'][:38]} | b={r2['beta']:.2f}{d2}")
+                        return "\n".join(rows2) or "  (ninguno)"
+
+                    _dep2 = ""
+                    if "dept_nm" in df_m1a.columns:
+                        for dn2, grp2 in df_m1a.groupby("dept_nm"):
+                            vc2 = grp2["recomendacion"].value_counts()
+                            _dep2 += f"  {str(dn2)[:22]}: " + " ".join(f"{r3}={c3}" for r3,c3 in vc2.items()) + "\n"
+
+                    _cal2 = ""
+                    if len(df_cal)>0:
+                        ms2 = df_cal[df_cal["accion"]=="SUBIR"]["mes_nombre"].value_counts().head(3).index.tolist()
+                        mp2 = df_cal[df_cal["accion"]=="PROMOVER"]["mes_nombre"].value_counts().head(3).index.tolist()
+                        _cal2 = f"SUBIR en: {', '.join(ms2) or 'N/A'} | PROMOVER en: {', '.join(mp2) or 'N/A'}"
+
+                    _fin2 = ""
+                    if len(df_sim)>0:
+                        def _tdf2(recs2, esc2b):
+                            sk2 = df_m1a[df_m1a["recomendacion"].isin(recs2)]["prod_nm"].tolist()
+                            b2  = df_sim[(df_sim["prod_nm"].isin(sk2))&(df_sim["cambio"]=="Base 0%")]["ingreso_est"].sum()
+                            t2  = df_sim[(df_sim["prod_nm"].isin(sk2))&(df_sim["cambio"]==esc2b)]["ingreso_est"].sum()
+                            return t2 - b2
+                        _ds2 = _tdf2(["Subir precio"],"+10%")
+                        _dp2 = _tdf2(["Bajar / Promover"],"-10%")
+                        _fin2 = f"Subir: ${_ds2:+,.0f}/mes | Promos: ${_dp2:+,.0f}/mes | Total: ${_ds2+_dp2:+,.0f}/mes"
+
+                    _prom2 = (
+                        "Eres consultor senior de revenue management para OfficeMax Mexico.\n"
+                        "Escribe un reporte ejecutivo integrado en espanol. Maximo 350 palabras.\n\n"
+                        f"PIPELINE:\n"
+                        f"- ML ({_mlg2}): R2={_mlr2:.3f} prediciendo ventas. Precio=driver controlable #1 (58% importancia).\n"
+                        f"- OLS por SKU: {len(df_m1a)} analizados, {len(_vdf2)} validos. Beta mediana={_bmd2:.2f}. {_psg2:.0f}% significativos.\n\n"
+                        f"DISTRIBUCION: Subir={_ns2} | Mantener={_nm2} | Promover={_np2} | Sin rec={_nn2}\n\n"
+                        f"POR DEPARTAMENTO:\n{_dep2}\n"
+                        f"TOP SUBIR PRECIO:\n{_ct2('Subir precio', '+10%')}\n\n"
+                        f"TOP PROMOVER:\n{_ct2('Bajar / Promover', '-10%')}\n\n"
+                        f"TIMING: {_cal2}\n"
+                        f"IMPACTO: {_fin2}\n\n"
+                        "SECCIONES (se especifico, no uses frases genericas):\n"
+                        "1. Hallazgo clave: que dice el ML+OLS del catalogo\n"
+                        "2. Acciones inmediatas: productos especificos, betas, impacto\n"
+                        "3. Timing: cuando ejecutar segun estacionalidad\n"
+                        "4. Proyeccion de impacto financiero\n"
+                        "5. Proximos pasos: como escalar al catalogo completo"
+                    )
+
+                    _resp2 = _cli2.messages.create(
+                        model="claude-haiku-4-5-20251001", max_tokens=1000,
+                        messages=[{"role":"user","content":_prom2}])
+                    st.session_state["ai_analysis"] = _resp2.content[0].text
+                except Exception as _e2:
+                    st.error(f"Error al llamar a Claude: {_e2}")
+
+        if st.session_state.get("ai_analysis"):
+            st.markdown(
+                '<div class="narrative-box" style="border-left-color:#7B1FA2;">' +
+                '<div style="font-size:11px;color:#7B1FA2;font-weight:700;margin-bottom:8px;">' +
+                'REPORTE EJECUTIVO — CLAUDE (Anthropic)</div></div>',
+                unsafe_allow_html=True)
+            st.markdown(st.session_state["ai_analysis"])

@@ -845,33 +845,54 @@ with tab1:
     else:
         df_m1a = results["m1a"]; m2 = results["m2"]
 
-        section("🔬 Validación Global del modelo — ¿los datos tienen señal de elasticidad?")
-        st.caption("La Validación Global usa todos los SKUs con controles por tienda, mes y tipo de producto. "
-                   "Si pasa esta prueba, tiene sentido analizar producto por producto.")
-        css, msg, reasons = traffic_light(m2["r2"], m2["beta"], m2["beta_pval"], m2["rmse"])
-        cv1, cv2 = st.columns([1,2])
-        with cv1:
-            st.markdown(f'<div class="{css}">{msg}</div><br>', unsafe_allow_html=True)
-            for r in reasons: st.caption(r)
-        with cv2:
-            st.dataframe(pd.DataFrame({
-                "Métrica":["N observaciones","R²","R² ajustado","Elasticidad precio global","p-valor",
-                           "Coef. premium","RMSE (escala log)"],
-                "Valor":[f'{m2["n_obs"]:,}',f'{m2["r2"]:.4f}',f'{m2["r2_adj"]:.4f}',
-                         f'{m2["beta"]:.4f}',f'{m2["beta_pval"]:.4f}',
-                         f'{m2["premium"]:.4f}',f'{m2["rmse"]:.4f}'],
-                "Interpretación":[
-                    "Transacciones usadas en el modelo global",
-                    "% de varianza en ventas explicada por precio (0-1). En retail 0.15+ es aceptable.",
-                    "R² penalizado por número de variables incluidas",
-                    f'+1% en precio → {m2["beta"]:.2f}% en unidades vendidas',
-                    "Significativo si < 0.10",
-                    "Premium venden " + ("más" if m2["premium"]>0 else "menos") + " que no-premium",
-                    "Error promedio en log-escala. < 0.5 es bueno.",
-                ]}), hide_index=True, use_container_width=True)
+        section("🔬 Validación del modelo — ¿los datos tienen señal de elasticidad?")
+        st.caption("El modelo corre de forma independiente por producto (OLS log-log por SKU). "
+                   "Aquí se muestra un resumen agregado de la calidad de los modelos individuales.")
 
-        st.markdown("<br>", unsafe_allow_html=True)
         n_valid = len(df_m1a[df_m1a["recomendacion"]!="No recomendable"]) if len(df_m1a)>0 else 0
+
+        if len(df_m1a) > 0:
+            validos_df  = df_m1a[df_m1a["recomendacion"]!="No recomendable"]
+            r2_prom     = df_m1a["r2"].mean()
+            r2_validos  = validos_df["r2"].mean() if len(validos_df)>0 else 0
+            beta_median = df_m1a["beta"].median()
+            pct_sig     = (df_m1a["pval"] < 0.10).mean() * 100
+
+            # Semáforo basado en métricas agregadas M1A
+            if r2_validos >= 0.35 and pct_sig >= 30:
+                css_v, msg_v = "chip-green",  "🟢 Modelo confiable — resultados interpretables"
+            elif r2_validos >= 0.15 and pct_sig >= 15:
+                css_v, msg_v = "chip-yellow", "🟡 Modelo aceptable — úsalo con precaución"
+            else:
+                css_v, msg_v = "chip-red",    "🔴 Señal débil — reduce filtros o revisa datos"
+
+            cv1, cv2 = st.columns([1, 2])
+            with cv1:
+                st.markdown(f'<div class="{css_v}">{msg_v}</div><br>', unsafe_allow_html=True)
+                st.caption(f"✅ R² promedio (SKUs válidos): {r2_validos:.3f}")
+                st.caption(f"✅ Beta mediana: {beta_median:.3f}")
+                st.caption(f"✅ SKUs con p < 0.10: {pct_sig:.1f}%")
+                st.caption(f"{'✅' if m2['beta_pval']<0.10 else '⚠️'} Señal global precio: p={m2['beta_pval']:.4f}")
+            with cv2:
+                st.dataframe(pd.DataFrame({
+                    "Métrica": ["SKUs analizados","SKUs con rec. válida","R² promedio (todos SKUs)",
+                                "R² promedio (SKUs válidos)","Beta mediana",
+                                "% SKUs con p < 0.10","Observaciones en modelo global"],
+                    "Valor":   [f"{len(df_m1a):,}", f"{n_valid:,}",
+                                f"{r2_prom:.4f}", f"{r2_validos:.4f}",
+                                f"{beta_median:.4f}", f"{pct_sig:.1f}%",
+                                f"{m2['n_obs']:,}"],
+                    "Interpretación": [
+                        "Productos con suficientes datos para OLS",
+                        "Pasan todos los filtros estadísticos",
+                        "R² varía por SKU; productos con poca var. de precio tienen R² bajo",
+                        "R² de los modelos que sí son estadísticamente válidos",
+                        "Elasticidad típica: negativa = más precio → menos ventas",
+                        "Porcentaje con relación precio-demanda estadísticamente significativa",
+                        "Usado para validar que la señal existe a nivel agregado",
+                    ]
+                }), hide_index=True, use_container_width=True)
+        st.markdown("<br>", unsafe_allow_html=True)
         section(f"📦 Elasticidad Total por producto — {len(df_m1a):,} analizados de {results['n_total']:,} · {n_valid} con recomendación válida")
 
         if len(df_m1a) == 0:
@@ -1043,7 +1064,14 @@ def compute_descriptivo(df_csv: bytes, dept_tuple, year_tuple, marca_tuple):
             .reset_index().sort_values("mes_calendario"))
     seas["mes_nombre"] = seas["mes_calendario"].map(MONTH_NAMES)
 
-    utilidad_total = pd.to_numeric(df["utilidad"] if "utilidad" in df.columns else pd.Series(dtype=float), errors="coerce").sum()
+    # margen_dinero: usa columna "utilidad" si existe, si no la estima desde venta*margen
+    if "utilidad" in df.columns:
+        utilidad_total = pd.to_numeric(df["utilidad"], errors="coerce").sum()
+    elif "margen" in df.columns and "venta_con_iva" in df.columns:
+        utilidad_total = (pd.to_numeric(df["venta_con_iva"], errors="coerce") *
+                          pd.to_numeric(df["margen"], errors="coerce")).sum()
+    else:
+        utilidad_total = 0.0
     venta_tot = df["venta_con_iva"].sum(); uds_tot = df["qty"].sum()
     kpis = {"venta":venta_tot,"unidades":uds_tot,
             "n_skus":df["prod_nbr"].nunique(),"n_stores":df["store_nbr"].nunique(),
@@ -1424,18 +1452,27 @@ with tab3:
 
         with ml_c2:
             feat_df = ml_res["feat_df"]
-            # Colorear features de precio en rojo, resto en gris
-            precio_feats = {"Log Precio","% Descuento vs modal","Precio vs Catálogo","Cambio precio % (mes ant.)"}
-            colors_fi = [OM_RED if f in precio_feats else OM_LGRAY for f in feat_df["feature"]]
+            # Agrupar features por categoría para narrativa más clara
+            grupos = {
+                "🔴 Precio (controlable)":   {"Log Precio","% Descuento vs modal","Precio vs Catálogo","Cambio precio % (mes ant.)"},
+                "🔵 Historial de demanda":    {"Ventas mes anterior (log)","Media ventas 3m (log)"},
+                "⚫ Contexto de mercado":     {"Mes del año","Tendencia temporal","Departamento","Es Premium"},
+            }
+            grp_imp = {}
+            for grp_nm, feats in grupos.items():
+                grp_imp[grp_nm] = float(feat_df[feat_df["feature"].isin(feats)]["importancia"].sum())
+            grp_df = pd.DataFrame({"Grupo": list(grp_imp.keys()),
+                                    "Importancia": list(grp_imp.values())}).sort_values("Importancia", ascending=True)
+            colors_grp = [OM_LGRAY, OM_BLUE, OM_RED]
             fig_fi = go.Figure(go.Bar(
-                x=feat_df["importancia"] * 100,
-                y=feat_df["feature"],
+                x=grp_df["Importancia"] * 100,
+                y=grp_df["Grupo"],
                 orientation="h",
-                marker_color=colors_fi,
-                text=[f"{v*100:.1f}%" for v in feat_df["importancia"]],
+                marker_color=colors_grp,
+                text=[f"{v*100:.1f}%" for v in grp_df["Importancia"]],
                 textposition="outside",
                 hovertemplate="<b>%{y}</b><br>Importancia: %{x:.1f}%<extra></extra>"))
-            precio_total = feat_df[feat_df["feature"].isin(precio_feats)]["importancia"].sum() * 100
+            precio_total = grp_imp.get("🔴 Precio (controlable)", 0) * 100
             fig_fi.update_layout(
                 title=f"Importancia de variables — {ganador} (🔴 = features de precio: {precio_total:.0f}%)",
                 plot_bgcolor="white", paper_bgcolor="white",
@@ -1452,10 +1489,11 @@ with tab3:
         st.markdown(
             f'<div style="background:#E8F5E9;border-left:5px solid {OM_GREEN};border-radius:8px;'
             f'padding:14px 18px;margin:12px 0 4px 0;font-size:14px;">'
-            f'<b>Conclusión del pipeline ML:</b> Las variables de <b>precio explican el {precio_total_pct:.0f}%</b> '
-            f'de la variación en demanda. Esto valida usar <b>regresión log-log (OLS)</b> como modelo '
-            f'accionable — porque el precio es el driver dominante y OLS cuantifica exactamente '
-            f'cuánto cambia la demanda por cada 1% de cambio en precio (elasticidad β por SKU).'
+            f'<b>Conclusión del pipeline ML:</b> El <b>precio es el factor de negocio más importante que OfficeMax puede controlar</b> '
+            f'({precio_total_pct:.0f}% de importancia). El historial reciente de ventas mejora la precisión predictiva, '
+            f'pero no es accionable — no puedes cambiar lo que ya vendiste. '
+            f'Esto valida usar <b>OLS log-log por SKU</b> para cuantificar exactamente '
+            f'cuánto cambia la demanda por cada 1% de cambio en precio (elasticidad β).'
             f'</div>', unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)

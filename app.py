@@ -1224,7 +1224,7 @@ with tab2:
     kpi(kc[4],"SKUs únicos",         f"{kpis['n_skus']:,}",                      OM_GREEN)
     kpi(kc[5],"Tiendas",             f"{kpis['n_stores']}",                      OM_AMBER)
     kpi(kc[6],"Margen promedio",     f"{kpis['margen']:.1f}%",                   "#7B1FA2")
-    kpi(kc[7],"Margen en dinero",    f"${kpis['margen_dinero']/1e3:.1f}K",      OM_GREEN)
+    kpi(kc[7],"Margen en dinero",    f"${kpis['margen_dinero']/1e6:.1f}M",      OM_GREEN)
     st.markdown("<br>", unsafe_allow_html=True)
 
     # Time series

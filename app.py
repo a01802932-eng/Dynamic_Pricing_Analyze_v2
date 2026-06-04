@@ -757,6 +757,38 @@ def run_ml_pipeline(df_csv: bytes, promo_bytes: bytes):
     sku_mes["dept_nm"] = sku_mes["prod_nbr"].map(dept_map)
     sku_mes["mes_nombre"] = sku_mes["mes_cal"].map(MONTH_NAMES)
 
+    # ── Evaluación por SKU: ¿la promo funcionó? ──────────────────────────────
+    skus_promo = mensual[mensual["tiene_promo"]==1]["prod_nbr"].unique()
+    eval_rows = []
+    prod_nm_map = mensual[["prod_nbr","prod_nm"]].drop_duplicates("prod_nbr").set_index("prod_nbr")["prod_nm"] if "prod_nm" in mensual.columns else {}
+    for sku in skus_promo:
+        grp = mensual[mensual["prod_nbr"]==sku]
+        sin  = grp[grp["tiene_promo"]==0]
+        con  = grp[grp["tiene_promo"]==1]
+        if len(sin)==0 or len(con)==0: continue
+        uds_base  = sin["unidades"].mean()
+        uds_promo = con["unidades"].mean()
+        rev_base  = sin["venta_tot"].mean()
+        rev_promo = con["venta_tot"].mean()
+        p_base    = sin["precio"].mean()
+        p_promo   = con["precio"].mean()
+        if uds_base<=0 or p_base<=0: continue
+        uplift_uds = (uds_promo - uds_base) / uds_base * 100
+        uplift_rev = (rev_promo - rev_base)  / rev_base  * 100
+        pct_desc   = (p_base - p_promo) / p_base * 100
+        rentable   = uplift_rev > 0
+        eval_rows.append({
+            "prod_nbr":   sku,
+            "prod_nm":    str(prod_nm_map.get(sku, sku))[:40],
+            "dept_nm":    str(dept_map.get(sku, "—"))[:25],
+            "pct_desc":   round(pct_desc, 1),
+            "uplift_uds": round(uplift_uds, 1),
+            "uplift_rev": round(uplift_rev, 1),
+            "rentable":   "✅ Sí" if rentable else "❌ No",
+            "meses_promo":int(len(con)),
+        })
+    promo_eval = pd.DataFrame(eval_rows).sort_values("uplift_uds", ascending=False) if eval_rows else pd.DataFrame()
+
     comp_out = {k:{kk:vv for kk,vv in v.items() if kk not in ("mod_u","mod_r")} for k,v in comparacion.items()}
     return {"ganador":ganador_nm,"comparacion":comp_out,"feat_df":feat_df,
             "r2_u":gan["r2_u"],"r2_r":gan["r2_r"],
@@ -771,7 +803,7 @@ def run_ml_pipeline(df_csv: bytes, promo_bytes: bytes):
             "promo_by_nivel":promo_by_nivel,
             "n_promo":int(mensual["tiene_promo"].sum()),"n_total":len(mensual),
             "top_sens":top_sens,
-            "dept_pivot":dept_pivot,"sku_mes":sku_mes}
+            "dept_pivot":dept_pivot,"sku_mes":sku_mes,"promo_eval":promo_eval}
 
 
 tab1, tab2, tab3 = st.tabs(["🧮  Calculadora","📈  Dashboard Descriptivo","🎯  Dashboard Predictivo"])
@@ -1920,6 +1952,36 @@ with tab3:
                                    xaxis_title="Cambio en precio (%)",yaxis_title="Cambio en resultado (%)",
                                    legend=dict(orientation="h",y=1.1))
                 st.plotly_chart(fig2, use_container_width=True)
+
+    # ── ¿La promoción funcionó? ───────────────────────────────────────────────
+    _promo_eval = ml_res.get("promo_eval") if ml_res else None
+    if _promo_eval is not None and len(_promo_eval) > 0:
+        section("🏷️ ¿Las promociones funcionaron?")
+        st.caption("Comparación de ventas y unidades en meses con promoción detectada vs meses normales, por producto.")
+
+        pe1, pe2, pe3 = st.columns(3)
+        n_rent = (_promo_eval["rentable"]=="✅ Sí").sum()
+        n_nort = (_promo_eval["rentable"]=="❌ No").sum()
+        kpi(pe1, "Promos evaluadas",    f"{len(_promo_eval)} SKUs",         OM_BLUE)
+        kpi(pe2, "Generaron más ventas",f"{n_rent} ({n_rent/len(_promo_eval)*100:.0f}%)", OM_GREEN)
+        kpi(pe3, "No generaron más ventas", f"{n_nort}",                    OM_RED)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        show_eval = _promo_eval[["prod_nm","dept_nm","pct_desc","uplift_uds","uplift_rev","rentable","meses_promo"]].copy()
+        show_eval.columns = ["Producto","Departamento","Descuento %","Uplift Unidades %","Uplift Ventas $%","¿Generó ventas?","Meses en promo"]
+
+        def _color_row(row):
+            color = "#E8F5E9" if row["¿Generó ventas?"]=="✅ Sí" else "#FFEBEE"
+            return [f"background-color:{color}"]*len(row)
+
+        st.dataframe(
+            show_eval.style.apply(_color_row, axis=1)
+                     .format({"Descuento %":"{:.1f}%","Uplift Unidades %":"{:+.1f}%","Uplift Ventas $%":"{:+.1f}%"}),
+            use_container_width=True, height=300, hide_index=True)
+
+        st.caption("Verde = la promo generó más ventas en $ (aunque sea poco). Rojo = las ventas bajaron o no cambiaron.")
+        st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Resumen ejecutivo con IA — sintetiza todo el analisis ────────────────
     st.markdown("<br>", unsafe_allow_html=True)

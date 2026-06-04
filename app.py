@@ -845,9 +845,9 @@ with tab1:
     else:
         df_m1a = results["m1a"]; m2 = results["m2"]
 
-        section("🔬 Validación del modelo — ¿los datos tienen señal de elasticidad?")
-        st.caption("El modelo corre de forma independiente por producto (OLS log-log por SKU). "
-                   "Aquí se muestra un resumen agregado de la calidad de los modelos individuales.")
+        section("🔬 OLS por SKU — ¿cuánto cambia la demanda si cambia el precio?")
+        st.caption("Regresión log-log individual por producto. No predice ventas totales — "
+                   "estima la elasticidad β: cuánto cambia la demanda ante un 1% de cambio en precio.")
 
         n_valid = len(df_m1a[df_m1a["recomendacion"]!="No recomendable"]) if len(df_m1a)>0 else 0
 
@@ -1428,9 +1428,9 @@ with tab3:
     # ── Paso 1: Pipeline ML — fundamento del modelo ───────────────────────────
     ml_res = st.session_state.get("ml_results")
     if ml_res:
-        section("🔬 Paso 1 — Validación con Machine Learning")
-        st.caption("Comparamos Random Forest vs Gradient Boosting para identificar qué factores "
-                   "explican la demanda. El resultado justifica el modelo de elasticidad OLS.")
+        section("🔬 Paso 1 — ¿Qué impulsa las ventas? Machine Learning")
+        st.caption("Random Forest vs Gradient Boosting para identificar los factores que más impactan la demanda. "
+                   "El objetivo: saber qué variable de negocio podemos controlar para mover las ventas.")
 
         # Tabla comparativa
         ml_c1, ml_c2 = st.columns([1, 2])
@@ -1489,11 +1489,11 @@ with tab3:
         st.markdown(
             f'<div style="background:#E8F5E9;border-left:5px solid {OM_GREEN};border-radius:8px;'
             f'padding:14px 18px;margin:12px 0 4px 0;font-size:14px;">'
-            f'<b>Conclusión del pipeline ML:</b> El <b>precio es el factor de negocio más importante que OfficeMax puede controlar</b> '
-            f'({precio_total_pct:.0f}% de importancia). El historial reciente de ventas mejora la precisión predictiva, '
-            f'pero no es accionable — no puedes cambiar lo que ya vendiste. '
-            f'Esto valida usar <b>OLS log-log por SKU</b> para cuantificar exactamente '
-            f'cuánto cambia la demanda por cada 1% de cambio en precio (elasticidad β).'
+            f'<b>Respuesta del ML:</b> El <b>precio es el factor de negocio más importante que OfficeMax puede controlar</b> '
+            f'({precio_total_pct:.0f}% de importancia entre factores accionables). '
+            f'→ <b>Siguiente pregunta: ¿cuánto hay que cambiar el precio de cada producto?</b> '
+            f'Eso lo responde el modelo OLS en el Paso 2: calcula la elasticidad β por SKU — '
+            f'cuánto cambia la demanda ante un 1% de cambio en precio, producto por producto.'
             f'</div>', unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -1553,7 +1553,7 @@ with tab3:
 
     # ── Paso 2: Resumen OLS ───────────────────────────────────────────────────
     _paso2_label = "Paso 2 — " if ml_res else ""
-    section(f"📊 {_paso2_label}Resultados del modelo OLS — Elasticidad por SKU")
+    section(f"📊 {_paso2_label}¿Cuánto exactamente? OLS — Elasticidad precio por SKU")
     rc = st.columns(4)
     for i,(rec,color) in enumerate(REC_COLORS.items()):
         cnt = rec_counts.get(rec,0)

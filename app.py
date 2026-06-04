@@ -577,7 +577,7 @@ if df_main is None:
 
 @st.cache_data(show_spinner=False)
 def run_ml_pipeline(df_csv: bytes, promo_bytes: bytes):
-    from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+    from sklearn.ensemble import RandomForestRegressor, HistGradientBoostingRegressor
     from sklearn.metrics import r2_score, mean_squared_error
     from sklearn.preprocessing import LabelEncoder
 
@@ -682,10 +682,10 @@ def run_ml_pipeline(df_csv: bytes, promo_bytes: bytes):
     # ── Entrenar RF y GB ──────────────────────────────────────────────────────
     comparacion = {}
     for nombre, (mu, mr) in {
-        "Random Forest":     (RandomForestRegressor(n_estimators=150, max_depth=8, min_samples_leaf=5, random_state=42, n_jobs=-1),
-                              RandomForestRegressor(n_estimators=150, max_depth=8, min_samples_leaf=5, random_state=42, n_jobs=-1)),
-        "Gradient Boosting": (GradientBoostingRegressor(n_estimators=150, max_depth=5, learning_rate=0.05, subsample=0.8, random_state=42),
-                              GradientBoostingRegressor(n_estimators=150, max_depth=5, learning_rate=0.05, subsample=0.8, random_state=42)),
+        "Random Forest":      (RandomForestRegressor(n_estimators=80, max_depth=8, min_samples_leaf=5, random_state=42, n_jobs=-1),
+                               RandomForestRegressor(n_estimators=80, max_depth=8, min_samples_leaf=5, random_state=42, n_jobs=-1)),
+        "Gradient Boosting":  (HistGradientBoostingRegressor(max_iter=80, max_depth=5, learning_rate=0.05, random_state=42),
+                               HistGradientBoostingRegressor(max_iter=80, max_depth=5, learning_rate=0.05, random_state=42)),
     }.items():
         mu.fit(X_train, y_u[train_mask]); mr.fit(X_train, y_r[train_mask])
         r2u = r2_score(y_u[test_mask], mu.predict(X_test))
@@ -697,7 +697,14 @@ def run_ml_pipeline(df_csv: bytes, promo_bytes: bytes):
 
     ganador_nm = max(comparacion, key=lambda k: comparacion[k]["r2_avg"])
     gan = comparacion[ganador_nm]
-    imp = (gan["mod_u"].feature_importances_ + gan["mod_r"].feature_importances_) / 2
+    # HistGradientBoosting no expone feature_importances_ → usar permutation importance o RF fallback
+    def _get_imp(model):
+        if hasattr(model, "feature_importances_"):
+            return model.feature_importances_
+        # Para HistGradientBoosting: usar el RF del comparacion como proxy
+        rf_mod = comparacion.get("Random Forest",{}).get("mod_u")
+        return rf_mod.feature_importances_ if rf_mod and hasattr(rf_mod,"feature_importances_") else np.ones(len(FEAT_COLS))/len(FEAT_COLS)
+    imp = (_get_imp(gan["mod_u"]) + _get_imp(gan["mod_r"])) / 2
     feat_df = pd.DataFrame({"feature":FEAT_NAMES,"importancia":imp}).sort_values("importancia",ascending=False)
 
     pred_u = gan["mod_u"].predict(X_test); pred_r = gan["mod_r"].predict(X_test)

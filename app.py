@@ -915,24 +915,38 @@ with tab1:
                     st.download_button("⬇️ Descargar simulación de precios (CSV)",
                         results["sim"].to_csv(index=False).encode("utf-8"),"simulacion_precios.csv","text/csv")
 
-        # ── Validación visual del modelo ──────────────────────────────────────
+        # ── Validación visual del modelo (usa ML si está disponible) ────────────
         st.markdown("<br>", unsafe_allow_html=True)
-        section("🎯 ¿Qué tan bien predice el modelo? — Predicción vs Realidad")
-        st.caption("Cada punto es una observación. Entre más cerca estén los puntos de la línea diagonal, "
-                   "más preciso es el modelo. Un modelo perfecto tendría todos los puntos sobre la línea.")
-
-        actual  = m2.get("actual_sample", [])
-        fitted  = m2.get("fitted_sample", [])
+        _ml_scatter = st.session_state.get("ml_results")
+        if _ml_scatter and _ml_scatter.get("actual_r"):
+            section("🎯 ¿Qué tan bien predice el modelo? — Gradient Boosting (Ventas en $)")
+            st.caption("Validación del modelo ML en el conjunto de prueba (últimos 6 meses no vistos durante el entrenamiento). "
+                       "Entre más cerca de la diagonal, mejor predice el modelo.")
+            actual = _ml_scatter["actual_r"]
+            fitted = _ml_scatter["fitted_r"]
+            r2_show = _ml_scatter["r2_r"]
+            n_train = _ml_scatter["n_train"]
+            n_test  = _ml_scatter["n_test"]
+            model_label = f"Gradient Boosting — {_ml_scatter.get('ganador','ML')}"
+        else:
+            section("🎯 ¿Qué tan bien predice el modelo? — Predicción vs Realidad")
+            st.caption("Validación del modelo OLS global (M2) con controles de tienda y mes.")
+            actual = m2.get("actual_sample", [])
+            fitted = m2.get("fitted_sample", [])
+            r2_show = m2["r2"]
+            n_train = m2["n_obs"]
+            n_test  = 0
+            model_label = "OLS Global (M2)"
 
         if actual and fitted:
             vv1, vv2 = st.columns([2, 1])
             with vv1:
-                max_val = float(np.percentile(actual + fitted, 95))
+                max_val = float(np.percentile([v for v in actual+fitted if v < 1e9], 95))
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(
                     x=actual, y=fitted, mode="markers",
                     marker=dict(size=4, color=OM_RED, opacity=0.35),
-                    hovertemplate="Real: %{x:.0f} uds<br>Predicho: %{y:.0f} uds<extra></extra>",
+                    hovertemplate="Real: $%{x:,.0f}<br>Predicho: $%{y:,.0f}<extra></extra>",
                     name="Observaciones"))
                 fig.add_trace(go.Scatter(
                     x=[0, max_val], y=[0, max_val],
@@ -941,32 +955,31 @@ with tab1:
                 fig.update_layout(
                     plot_bgcolor="white", paper_bgcolor="white",
                     height=380, margin=dict(t=30,b=40,l=40,r=20),
-                    xaxis=dict(title="Unidades reales vendidas", range=[0, max_val]),
-                    yaxis=dict(title="Unidades predichas por el modelo", range=[0, max_val]),
+                    xaxis=dict(title="Ventas reales ($)", range=[0, max_val]),
+                    yaxis=dict(title="Ventas predichas ($)", range=[0, max_val]),
                     legend=dict(orientation="h", y=1.05))
                 st.plotly_chart(fig, use_container_width=True)
 
             with vv2:
-                r2_pct = m2["r2"] * 100
-                r2_color = OM_GREEN if m2["r2"] >= 0.4 else (OM_AMBER if m2["r2"] >= 0.15 else OM_RED)
+                r2_pct  = r2_show * 100
+                r2_color = OM_GREEN if r2_show >= 0.4 else (OM_AMBER if r2_show >= 0.15 else OM_RED)
                 st.markdown(f"""
                 <div style="background:white;border-radius:14px;padding:24px;
                             text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.08);
                             border-top:5px solid {r2_color}; margin-bottom:16px;">
                     <div style="font-size:48px;font-weight:900;color:{r2_color};">{r2_pct:.1f}%</div>
                     <div style="font-size:13px;color:#555;margin-top:6px;">
-                        de la variación en ventas explicada por el precio
+                        de la variación en ventas explicada por el modelo
                     </div>
-                    <div style="font-size:11px;color:#999;margin-top:4px;">(R² del Modelo Global)</div>
+                    <div style="font-size:11px;color:#999;margin-top:4px;">R² — {model_label}</div>
                 </div>
                 <div style="background:white;border-radius:14px;padding:18px;
                             box-shadow:0 2px 8px rgba(0,0,0,0.08);">
                     <div style="font-size:12px;color:#555;line-height:2.2;">
-                    <b>Confianza estadística:</b><br>
-                    {"✅ Alta (p < 0.05)" if m2["beta_pval"] < 0.05 else "⚠️ Media (p < 0.10)" if m2["beta_pval"] < 0.10 else "❌ Baja"}<br>
-                    <b>Error promedio (RMSE):</b> {m2["rmse"]:.4f}<br>
-                    <b>SKUs con recomendación válida:</b> {n_valid}<br>
-                    <b>Observaciones del modelo:</b> {m2["n_obs"]:,}
+                    <b>Observaciones entrenamiento:</b> {n_train:,}<br>
+                    <b>Observaciones prueba:</b> {n_test:,}<br>
+                    <b>SKUs con rec. válida (OLS):</b> {n_valid}<br>
+                    <b>Modelo ML:</b> {model_label}
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -1442,71 +1455,54 @@ with tab3:
 
         # ── Paso 1b: Timing óptimo de promociones ─────────────────────────────
         if "dept_pivot" in ml_res and ml_res["dept_pivot"] is not None:
-            section("📅 Paso 1b — ¿Cuándo actuar? Timing óptimo por departamento y SKU")
-            st.caption("Uplift promedio de ventas en meses con promoción vs sin promoción. "
-                       "Verde = mes de alto impacto, rojo = promo no mueve mucho.")
+            section("📅 Paso 1b — ¿Cuándo actuar? Timing óptimo por departamento")
+            st.caption("Uplift promedio de ventas en meses con promoción vs sin promoción (datos históricos). "
+                       "Verde = meses donde las promociones generan más impacto.")
 
             dept_pivot = ml_res["dept_pivot"]
-            sku_mes    = ml_res["sku_mes"]
 
-            # ── Heatmap por departamento ───────────────────────────────────────
-            st.markdown("**Vista departamento — ¿qué depto responde más en cada mes?**")
-            fig_dh = go.Figure(data=go.Heatmap(
-                z=dept_pivot.values,
-                x=list(dept_pivot.columns),
-                y=[d[:30] for d in dept_pivot.index],
-                colorscale=[[0,"#EF5350"],[0.4,"#FFF9C4"],[1,"#43A047"]],
-                zmid=0,
-                text=[[f"{v:.0f}%" if not np.isnan(v) else "" for v in row]
-                      for row in dept_pivot.values],
-                texttemplate="%{text}", textfont=dict(size=10),
-                hovertemplate="<b>%{y}</b><br>%{x}: %{z:.1f}% uplift<extra></extra>",
-                colorbar=dict(title="Uplift %", thickness=14)))
-            fig_dh.update_layout(
-                height=max(300, len(dept_pivot)*32+80),
-                margin=dict(t=30,b=20,l=10,r=10),
-                paper_bgcolor="white", plot_bgcolor="white",
-                xaxis=dict(side="top"))
-            st.plotly_chart(fig_dh, use_container_width=True)
+            # Top 3 meses por departamento → bar chart claro
+            dept_top = []
+            for dept in dept_pivot.index:
+                row = dept_pivot.loc[dept].dropna().sort_values(ascending=False)
+                for mes, uplift in row.head(3).items():
+                    dept_top.append({"Departamento": dept[:25], "Mes": mes,
+                                     "Uplift %": round(uplift, 1)})
+            dept_top_df = pd.DataFrame(dept_top)
 
-            # ── Heatmap por SKU (filtrado por depto) ──────────────────────────
-            st.markdown("**Vista SKU — zoom por departamento**")
-            depts_con_data = sorted(sku_mes["dept_nm"].dropna().unique().tolist())
-            sel_dept_heat = st.selectbox("Departamento", depts_con_data, key="heat_dept_sel")
+            pb1, pb2 = st.columns([3, 2])
+            with pb1:
+                if len(dept_top_df) > 0:
+                    fig_bar = px.bar(
+                        dept_top_df.sort_values("Uplift %", ascending=False).head(20),
+                        x="Uplift %", y="Departamento", color="Mes",
+                        orientation="h", barmode="group",
+                        title="Top meses de mayor uplift por departamento",
+                        color_discrete_sequence=px.colors.qualitative.Set2)
+                    fig_bar.update_layout(plot_bgcolor="white", paper_bgcolor="white",
+                                          height=380, margin=dict(t=45,b=20,l=10,r=20),
+                                          yaxis=dict(autorange="reversed"),
+                                          legend=dict(orientation="h", y=1.08))
+                    fig_bar.update_traces(
+                        hovertemplate="<b>%{y}</b><br>%{x:.1f}% uplift en %{marker.color}<extra></extra>")
+                    st.plotly_chart(fig_bar, use_container_width=True)
 
-            sku_dept = sku_mes[sku_mes["dept_nm"]==sel_dept_heat].copy()
-            if len(sku_dept) > 0:
-                # Pivot SKU × mes
-                sku_pivot = (sku_dept.pivot_table(index="prod_nbr", columns="mes_cal",
-                                                   values="uplift_pct", aggfunc="mean")
-                             .reindex(columns=range(1,13)))
-                sku_pivot.columns = [MONTH_NAMES[c] for c in sku_pivot.columns]
-                # Ordenar por uplift promedio descendente, top 20
-                sku_pivot["_avg"] = sku_pivot.mean(axis=1)
-                sku_pivot = sku_pivot.sort_values("_avg", ascending=False).drop("_avg", axis=1).head(20)
-
-                fig_sh = go.Figure(data=go.Heatmap(
-                    z=sku_pivot.values,
-                    x=list(sku_pivot.columns),
-                    y=[str(s)[:35] for s in sku_pivot.index],
-                    colorscale=[[0,"#EF5350"],[0.4,"#FFF9C4"],[1,"#43A047"]],
+            with pb2:
+                # Heatmap departamento × mes (compacto)
+                fig_dh = go.Figure(data=go.Heatmap(
+                    z=dept_pivot.values,
+                    x=list(dept_pivot.columns),
+                    y=[d[:22] for d in dept_pivot.index],
+                    colorscale=[[0,"#EF5350"],[0.45,"#FFF9C4"],[1,"#43A047"]],
                     zmid=0,
-                    text=[[f"{v:.0f}%" if not np.isnan(v) else "" for v in row]
-                          for row in sku_pivot.values],
-                    texttemplate="%{text}", textfont=dict(size=9),
                     hovertemplate="<b>%{y}</b><br>%{x}: %{z:.1f}% uplift<extra></extra>",
-                    colorbar=dict(title="Uplift %", thickness=14)))
-                fig_sh.update_layout(
-                    height=max(300, len(sku_pivot)*28+80),
-                    margin=dict(t=30,b=20,l=10,r=10),
+                    showscale=False))
+                fig_dh.update_layout(
+                    height=380, margin=dict(t=30,b=10,l=10,r=10),
                     paper_bgcolor="white", plot_bgcolor="white",
-                    xaxis=dict(side="top"),
+                    xaxis=dict(side="top", tickfont=dict(size=10)),
                     yaxis=dict(tickfont=dict(size=9)))
-                st.plotly_chart(fig_sh, use_container_width=True)
-                st.caption(f"Top {len(sku_pivot)} SKUs de {sel_dept_heat} con más meses de promoción detectados. "
-                           f"Ordenados por uplift promedio anual.")
-            else:
-                st.info(f"No hay suficientes observaciones de promo en {sel_dept_heat}.")
+                st.plotly_chart(fig_dh, use_container_width=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
 

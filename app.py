@@ -1024,9 +1024,12 @@ def compute_descriptivo(df_csv: bytes, dept_tuple, year_tuple, marca_tuple):
     seas["mes_nombre"] = seas["mes_calendario"].map(MONTH_NAMES)
 
     utilidad_total = pd.to_numeric(df["utilidad"] if "utilidad" in df.columns else pd.Series(dtype=float), errors="coerce").sum()
-    kpis = {"venta":df["venta_con_iva"].sum(),"unidades":df["qty"].sum(),
+    venta_tot = df["venta_con_iva"].sum(); uds_tot = df["qty"].sum()
+    kpis = {"venta":venta_tot,"unidades":uds_tot,
             "n_skus":df["prod_nbr"].nunique(),"n_stores":df["store_nbr"].nunique(),
             "margen":df["margen"].mean()*100,"margen_dinero":utilidad_total,
+            "ticket_prom":df["venta_con_iva"].mean(),
+            "precio_prom":venta_tot/uds_tot if uds_tot>0 else 0,
             "p95_p":df["precio_tx"].quantile(0.95),"p95_q":df["qty"].quantile(0.95)}
 
     dist_p  = df[df["precio_tx"]<=kpis["p95_p"]][["precio_tx"]].copy()
@@ -1165,13 +1168,15 @@ with tab2:
 
     # KPIs
     section("📊 Indicadores clave")
-    kc = st.columns(6)
-    kpi(kc[0],"Venta total",       f"${kpis['venta']/1e6:.1f}M",            OM_RED)
-    kpi(kc[1],"Unidades vendidas", f"{kpis['unidades']/1e3:.0f}K",           OM_BLUE)
-    kpi(kc[2],"SKUs únicos",       f"{kpis['n_skus']:,}",                    OM_GREEN)
-    kpi(kc[3],"Tiendas",           f"{kpis['n_stores']}",                    OM_AMBER)
-    kpi(kc[4],"Margen promedio",   f"{kpis['margen']:.1f}%",                 "#7B1FA2")
-    kpi(kc[5],"Margen en dinero",  f"${kpis['margen_dinero']/1e3:.1f}K",    OM_GREEN)
+    kc = st.columns(8)
+    kpi(kc[0],"Venta total",         f"${kpis['venta']/1e6:.1f}M",              OM_RED)
+    kpi(kc[1],"Unidades vendidas",   f"{kpis['unidades']/1e3:.0f}K",             OM_BLUE)
+    kpi(kc[2],"Ticket promedio",     f"${kpis['ticket_prom']:,.0f}",             OM_AMBER)
+    kpi(kc[3],"Precio prom. unit.",  f"${kpis['precio_prom']:,.2f}",             OM_BLUE)
+    kpi(kc[4],"SKUs únicos",         f"{kpis['n_skus']:,}",                      OM_GREEN)
+    kpi(kc[5],"Tiendas",             f"{kpis['n_stores']}",                      OM_AMBER)
+    kpi(kc[6],"Margen promedio",     f"{kpis['margen']:.1f}%",                   "#7B1FA2")
+    kpi(kc[7],"Margen en dinero",    f"${kpis['margen_dinero']/1e3:.1f}K",      OM_GREEN)
     st.markdown("<br>", unsafe_allow_html=True)
 
     # Time series
@@ -1259,24 +1264,6 @@ with tab2:
         st.plotly_chart(_layout(fig,h=440), use_container_width=True)
 
     # Distributions
-    section("📊 Distribuciones de precio, margen y unidades")
-    dc1,dc2,dc3 = st.columns(3)
-    with dc1:
-        fig = px.histogram(agg["dist_p"], x="precio_tx", nbins=50, title="Distribución de precios",
-                           labels={"precio_tx":"Precio unitario ($)"}, color_discrete_sequence=[OM_RED])
-        fig.update_layout(showlegend=False, bargap=0.05)
-        st.plotly_chart(_layout(fig,h=280), use_container_width=True)
-    with dc2:
-        fig = px.histogram(agg["dist_m"], x="margen", nbins=40, title="Distribución de márgenes",
-                           labels={"margen":"Margen (ratio)"}, color_discrete_sequence=[OM_GREEN])
-        fig.update_layout(showlegend=False, bargap=0.05)
-        st.plotly_chart(_layout(fig,h=280), use_container_width=True)
-    with dc3:
-        fig = px.histogram(agg["dist_q"], x="qty", nbins=40, title="Unidades por transacción",
-                           labels={"qty":"Unidades"}, color_discrete_sequence=[OM_AMBER])
-        fig.update_layout(showlegend=False, bargap=0.05)
-        st.plotly_chart(_layout(fig,h=280), use_container_width=True)
-
     # Premium
     section("⭐ Premium vs No Premium")
     prem = agg["prem"]
@@ -1354,6 +1341,41 @@ with tab3:
         st.stop()
 
     rec_counts = df_m1a["recomendacion"].value_counts()
+
+    # ── KPIs del dashboard predictivo ────────────────────────────────────────
+    section("📊 Indicadores clave del análisis")
+    n_validos  = int(rec_counts.get("Subir precio",0) + rec_counts.get("Mantener precio",0) + rec_counts.get("Bajar / Promover",0))
+    n_subir    = int(rec_counts.get("Subir precio",0))
+    n_promover = int(rec_counts.get("Bajar / Promover",0))
+    n_mantener = int(rec_counts.get("Mantener precio",0))
+    pct_valid  = n_validos / len(df_m1a) * 100 if len(df_m1a) > 0 else 0
+
+    # Impacto financiero estimado
+    _imp_sub = _imp_prm = 0
+    if len(df_sim) > 0:
+        def _quick_delta(recs, esc):
+            ns = df_m1a[df_m1a["recomendacion"].isin(recs)]["prod_nm"].tolist()
+            b = df_sim[(df_sim["prod_nm"].isin(ns)) & (df_sim["cambio"]=="Base 0%")]["ingreso_est"].sum()
+            t = df_sim[(df_sim["prod_nm"].isin(ns)) & (df_sim["cambio"]==esc)]["ingreso_est"].sum()
+            return t - b
+        _imp_sub = _quick_delta(["Subir precio"], "+10%")
+        _imp_prm = _quick_delta(["Bajar / Promover"], "-10%")
+    _imp_total_anual = (_imp_sub + _imp_prm) * 12
+
+    # R² y precio importance del ML
+    _ml_kpi = st.session_state.get("ml_results")
+    _r2_ml  = f"{_ml_kpi['r2_r']:.2f}" if _ml_kpi else "—"
+    _precio_feats = {"Log Precio","% Descuento vs modal","Precio vs Catálogo","Cambio precio % (mes ant.)"}
+    _precio_pct = f"{float(_ml_kpi['feat_df'][_ml_kpi['feat_df']['feature'].isin(_precio_feats)]['importancia'].sum())*100:.0f}%" if _ml_kpi else "—"
+
+    pk = st.columns(6)
+    kpi(pk[0], "SKUs con recomendación",  f"{n_validos} ({pct_valid:.0f}%)",   OM_RED)
+    kpi(pk[1], "Subir precio",            f"{n_subir} SKUs",                    OM_BLUE)
+    kpi(pk[2], "Promover / Bajar",        f"{n_promover} SKUs",                 OM_GREEN)
+    kpi(pk[3], "Mantener precio",         f"{n_mantener} SKUs",                 OM_AMBER)
+    kpi(pk[4], "Impacto anualizado est.", f"+${_imp_total_anual:,.0f}",         OM_RED)
+    kpi(pk[5], "Precio explica demanda",  _precio_pct,                          OM_BLUE)
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Paso 1: Pipeline ML — fundamento del modelo ───────────────────────────
     ml_res = st.session_state.get("ml_results")
@@ -2024,30 +2046,6 @@ Tono: directo, ejecutivo, orientado a acción. Máximo 400 palabras."""
                 st.plotly_chart(fig2, use_container_width=True)
 
     # ── Beta distribution ─────────────────────────────────────────────────────
-    section("📊 Distribución de elasticidad — vista general")
-    bc1,bc2 = st.columns([3,2])
-    with bc1:
-        fig=px.histogram(df_m1a,x="beta",nbins=40,color="recomendacion",
-                         color_discrete_map=REC_COLORS,
-                         title="Distribución de beta por SKU",
-                         labels={"beta":"Beta (elasticidad precio)"},
-                         barmode="overlay",opacity=0.75)
-        fig.add_vline(x=-1,line_dash="dash",line_color="gray",opacity=0.7,
-                      annotation_text="β=-1",annotation_position="top right")
-        fig.add_vline(x=-1.5,line_dash="dot",line_color="gray",opacity=0.5,
-                      annotation_text="β=-1.5",annotation_position="top left")
-        fig.add_vline(x=0,line_color="black",line_width=0.5,opacity=0.4)
-        st.plotly_chart(_layout(fig,h=340), use_container_width=True)
-    with bc2:
-        fig=px.pie(values=rec_counts.values,names=rec_counts.index,
-                   title="SKUs por recomendación",
-                   color=rec_counts.index,color_discrete_map=REC_COLORS)
-        fig.update_traces(textposition="inside",textinfo="percent+label",textfont_size=11,
-                          hovertemplate="<b>%{label}</b><br>%{value} SKUs (%{percent})<extra></extra>")
-        fig.update_layout(showlegend=False,height=340,paper_bgcolor="white",
-                          margin=dict(t=45,b=20,l=20,r=20))
-        st.plotly_chart(fig, use_container_width=True)
-
     # ── Rolling beta ──────────────────────────────────────────────────────────
     has_rolling = len(df_m1b)>0 or len(df_m1c)>0
     if has_rolling:

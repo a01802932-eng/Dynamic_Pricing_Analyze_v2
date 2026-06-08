@@ -104,6 +104,25 @@ html, body, [class*="css"] { font-family: 'Roboto', Arial, sans-serif !important
     border-radius:12px; font-size:11px; font-weight:700; }
 .insight-box { background:#FFF8E1; border-left:4px solid #FFD100; border-radius:0 8px 8px 0;
     padding:8px 14px; font-size:13px; color:#333; margin:6px 0 16px 0; }
+/* Fix 1 — file uploader dark sidebar visibility */
+[data-testid="stFileUploader"] {
+    background-color: #2C2C2C !important;
+    border: 1px solid #555555 !important;
+    border-radius: 8px !important;
+}
+[data-testid="stFileUploader"] * { color: #FFFFFF !important; }
+[data-testid="stFileUploader"] svg { fill: #FFFFFF !important; }
+[data-testid="stFileUploader"] small { color: #AAAAAA !important; }
+/* Fix 1 — expander dark background */
+section[data-testid="stSidebar"] [data-testid="stExpander"] {
+    background-color: #2C2C2C !important;
+    border: 1px solid #555555 !important;
+    border-radius: 8px !important;
+}
+section[data-testid="stSidebar"] [data-testid="stExpander"] * { color: #FFFFFF !important; }
+/* Fix 1 — ensure all sidebar text white */
+section[data-testid="stSidebar"] * { color: #FFFFFF !important; }
+section[data-testid="stSidebar"] .stMarkdown p { color: #DDDDDD !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -467,9 +486,16 @@ def section(title):
     st.markdown(f'<div class="section-header">{title}</div>', unsafe_allow_html=True)
 
 def kpi(col, label, value, color=OM_RED):
-    col.markdown(f'<div class="kpi-card" style="border-top-color:{color};">'
-                 f'<div class="kpi-value">{value}</div>'
-                 f'<div class="kpi-label">{label}</div></div>', unsafe_allow_html=True)
+    col.markdown(
+        f'<div style="background:white;border-radius:12px;border-top:4px solid {color};'
+        f'padding:20px 16px;text-align:center;min-height:110px;display:flex;'
+        f'flex-direction:column;justify-content:center;'
+        f'box-shadow:0 2px 8px rgba(0,0,0,0.08);margin-bottom:8px;">'
+        f'<div style="font-size:1.8rem;font-weight:800;color:#1A1A1A;'
+        f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{value}</div>'
+        f'<div style="font-size:0.7rem;font-weight:600;color:#666;text-transform:uppercase;'
+        f'letter-spacing:0.05em;margin-top:8px;white-space:nowrap;">{label}</div>'
+        f'</div>', unsafe_allow_html=True)
 
 def traffic_light(r2, beta, pval, rmse):
     score = 0; reasons = []
@@ -509,13 +535,16 @@ def _fmt_bar(fig, values, prefix="$", suffix="", decimals=0):
 with st.sidebar:
     # ── Logo ────────────────────────────────────────────────────────────────
     try:
-        st.image("static/logo-officemax.png", width=180)
+        st.image("static/officemax-seeklogo.png", width=180)
     except Exception:
-        st.markdown("""
-        <div class="sidebar-logo-wrap">
-            <span style="font-size:26px;font-weight:900;color:#E31837;">OFFICEMAX</span><br>
-            <span style="font-size:9px;color:#aaa;letter-spacing:2px;">DYNAMIC PRICING ANALYZER</span>
-        </div>""", unsafe_allow_html=True)
+        try:
+            st.image("static/logo-officemax.png", width=180)
+        except Exception:
+            st.markdown("""
+            <div class="sidebar-logo-wrap">
+                <span style="font-size:26px;font-weight:900;color:#E31837;">OFFICEMAX</span><br>
+                <span style="font-size:9px;color:#aaa;letter-spacing:2px;">DYNAMIC PRICING ANALYZER</span>
+            </div>""", unsafe_allow_html=True)
 
     st.markdown("<hr class='sidebar-divider'>", unsafe_allow_html=True)
 
@@ -1139,39 +1168,64 @@ def compute_descriptivo(df_csv: bytes, dept_tuple, year_tuple, marca_tuple):
 
     ts = (df.groupby("mes_str").agg(venta=("venta_con_iva","sum"),unidades=("qty","sum"))
           .reset_index().sort_values("mes_str"))
-    dept = (df.groupby("dept_nm").agg(venta=("venta_con_iva","sum"),n_skus=("prod_nbr","nunique"))
-            .reset_index().sort_values("venta",ascending=False))
+    # dept with weighted margin
+    dept_grp = df.groupby("dept_nm")
+    dept = dept_grp.agg(venta=("venta_con_iva","sum"), n_skus=("prod_nbr","nunique")).reset_index()
+    dept_util = dept_grp.apply(
+        lambda g: (g["venta_con_iva"] * g["margen"]).sum() / g["venta_con_iva"].sum()
+        if g["venta_con_iva"].sum() > 0 else 0).reset_index(name="margen_pond")
+    dept = dept.merge(dept_util, on="dept_nm", how="left").sort_values("venta", ascending=False)
     dept["dept_short"] = dept["dept_nm"].str[:28]
+    dept["margen_pct_pond"] = dept["margen_pond"] * 100
+
     stores = (df.groupby(["store_nbr","store_nm"])
-              .agg(venta=("venta_con_iva","sum"),margen=("margen","mean"),unidades=("qty","sum"))
+              .agg(venta=("venta_con_iva","sum"), margen=("margen","mean"),
+                   unidades=("qty","sum"), n_skus=("prod_nbr","nunique"))
               .reset_index().sort_values("venta",ascending=False).head(20))
     stores["label"] = stores["store_nbr"].astype(str)+" "+stores["store_nm"].astype(str).str.strip().str[:12]
     stores["margen_pct"] = stores["margen"]*100
+
     top_sku = (df.groupby(["prod_nbr","prod_nm"])
                .agg(venta=("venta_con_iva","sum"),unidades=("qty","sum"),
                     precio_prom=("precio_tx","mean"),margen=("margen","mean"))
                .reset_index().sort_values("venta",ascending=False).head(15))
     top_sku["label"] = top_sku["prod_nbr"].astype(str)+" "+top_sku["prod_nm"].str[:20]
+
     prem = (df.groupby("es_premium")
             .agg(venta=("venta_con_iva","sum"),unidades=("qty","sum"),
                  precio_prom=("precio_tx","mean"),margen_prom=("margen","mean"))
             .reset_index())
     prem["tipo"] = prem["es_premium"].map({0:"No Premium",1:"Premium"})
     prem["margen_pct"] = prem["margen_prom"]*100
-    marca = (df.groupby("tipo_marca").agg(venta=("venta_con_iva","sum"),margen_prom=("margen","mean"))
-             .reset_index()) if "tipo_marca" in df.columns else pd.DataFrame()
-    if len(marca)>0: marca["margen_pct"] = marca["margen_prom"]*100
+
+    if "tipo_marca" in df.columns:
+        marca = (df.groupby("tipo_marca")
+                 .agg(venta=("venta_con_iva","sum"), margen_prom=("margen","mean"),
+                      n_skus=("prod_nbr","nunique"), ticket_prom=("precio_tx","mean"))
+                 .reset_index())
+        marca["margen_pct"] = marca["margen_prom"]*100
+    else:
+        marca = pd.DataFrame()
+
     seas = (df.groupby("mes_calendario")
             .agg(venta_prom=("venta_con_iva","mean"),unidades_prom=("qty","mean"))
             .reset_index().sort_values("mes_calendario"))
     seas["mes_nombre"] = seas["mes_calendario"].map(MONTH_NAMES)
 
+    # Monthly weighted margin series (Fix 4)
+    df["_util_row"] = df["venta_con_iva"] * df["margen"]
+    margen_ts = (df.groupby("mes_str")
+                 .apply(lambda g: g["_util_row"].sum() / g["venta_con_iva"].sum()
+                        if g["venta_con_iva"].sum() > 0 else 0)
+                 .reset_index(name="margen_pond"))
+    margen_ts["margen_pct"] = margen_ts["margen_pond"] * 100
+    margen_ts = margen_ts.sort_values("mes_str")
+
     # margen_dinero: usa columna "utilidad" si existe, si no la estima desde venta*margen
     if "utilidad" in df.columns:
         utilidad_total = pd.to_numeric(df["utilidad"], errors="coerce").sum()
     elif "margen" in df.columns and "venta_con_iva" in df.columns:
-        utilidad_total = (pd.to_numeric(df["venta_con_iva"], errors="coerce") *
-                          pd.to_numeric(df["margen"], errors="coerce")).sum()
+        utilidad_total = df["_util_row"].sum()
     else:
         utilidad_total = 0.0
     venta_tot = df["venta_con_iva"].sum(); uds_tot = df["qty"].sum()
@@ -1187,7 +1241,7 @@ def compute_descriptivo(df_csv: bytes, dept_tuple, year_tuple, marca_tuple):
     dist_q  = df[df["qty"]<=kpis["p95_q"]][["qty"]].copy()
 
     return {"ts":ts,"dept":dept,"stores":stores,"top_sku":top_sku,"prem":prem,
-            "marca":marca,"seas":seas,"kpis":kpis,
+            "marca":marca,"seas":seas,"kpis":kpis,"margen_ts":margen_ts,
             "dist_p":dist_p,"dist_m":dist_m,"dist_q":dist_q}
 
 
@@ -1316,17 +1370,18 @@ with tab2:
         st.stop()
     kpis = agg["kpis"]
 
-    # KPIs
+    # KPIs — 2 rows of 4 (Fix 3)
     section("📊 Indicadores clave del negocio")
-    kc = st.columns(8)
-    kpi(kc[0], "Ventas totales",              f"${kpis['venta']/1e6:.1f}M",           OM_RED)
-    kpi(kc[1], "Unidades vendidas",           f"{kpis['unidades']/1e3:.0f}K",          OM_BLUE)
-    kpi(kc[2], "Ticket promedio por compra",  f"${kpis['ticket_prom']:,.0f}",          OM_AMBER)
-    kpi(kc[3], "Precio promedio por unidad",  f"${kpis['precio_prom']:,.2f}",          OM_BLUE)
-    kpi(kc[4], "Productos distintos",         f"{kpis['n_skus']:,}",                   OM_GREEN)
-    kpi(kc[5], "Tiendas activas",             f"{kpis['n_stores']}",                   OM_AMBER)
-    kpi(kc[6], "Margen de utilidad",          f"{kpis['margen']:.1f}%",                "#7B1FA2")
-    kpi(kc[7], "Utilidad total",              f"${kpis['margen_dinero']/1e6:.1f}M",    OM_GREEN)
+    kc1r = st.columns(4)
+    kpi(kc1r[0], "Ventas totales",             f"${kpis['venta']/1e6:.1f}M",        OM_RED)
+    kpi(kc1r[1], "Unidades vendidas",          f"{kpis['unidades']/1e3:.0f}K",       OM_BLUE)
+    kpi(kc1r[2], "Ticket promedio por compra", f"${kpis['ticket_prom']:,.0f}",       OM_AMBER)
+    kpi(kc1r[3], "Precio promedio por unidad", f"${kpis['precio_prom']:,.2f}",       OM_BLUE)
+    kc2r = st.columns(4)
+    kpi(kc2r[0], "Productos distintos",        f"{kpis['n_skus']:,}",                OM_GREEN)
+    kpi(kc2r[1], "Tiendas activas",            f"{kpis['n_stores']}",                OM_AMBER)
+    kpi(kc2r[2], "Margen de utilidad",         f"{kpis['margen']:.1f}%",             "#7B1FA2")
+    kpi(kc2r[3], "Utilidad total",             f"${kpis['margen_dinero']/1e6:.1f}M", OM_GREEN)
     st.markdown("<br>", unsafe_allow_html=True)
 
     # Time series
@@ -1349,50 +1404,99 @@ with tab2:
         fig.update_xaxes(tickangle=45)
         st.plotly_chart(_layout(fig), use_container_width=True)
 
-    # Department
-    section("🏷️ Ventas por departamento")
+    # Department — Fix 6: dual-axis bars + margin line
+    section("🏷️ Ventas y margen por departamento")
     dept = agg["dept"]
-    dc1,dc2 = st.columns([3,2])
-    with dc1:
-        fig = px.bar(dept, x="venta", y="dept_short", orientation="h",
-                     title="Venta total por departamento",
-                     labels={"venta":"Ventas ($)","dept_short":"Departamento"},
-                     color="venta", color_continuous_scale=[[0,"#FFCDD2"],[1,OM_RED]])
-        fig.update_layout(coloraxis_showscale=False, yaxis=dict(autorange="reversed"), showlegend=False)
-        fig.update_traces(hovertemplate="<b>%{y}</b><br>Ventas: $%{x:,.0f}<extra></extra>")
-        st.plotly_chart(_layout(fig, h=380), use_container_width=True)
-    with dc2:
-        fig = px.pie(dept.head(8), values="venta", names="dept_short", title="Participación (top 8)",
-                     color_discrete_sequence=px.colors.qualitative.Set2)
-        fig.update_traces(textposition="inside", textinfo="percent", textfont_size=11,
-                          hovertemplate="<b>%{label}</b><br>%{percent}<extra></extra>")
-        fig.update_layout(showlegend=True, height=380, paper_bgcolor="white", margin=dict(t=45,b=20,l=20,r=20))
-        st.plotly_chart(fig, use_container_width=True)
+    fig_dept = go.Figure()
+    dept_sorted = dept.sort_values("venta", ascending=True)
+    fig_dept.add_trace(go.Bar(
+        x=dept_sorted["venta"], y=dept_sorted["dept_short"],
+        orientation="h", name="Ventas ($)",
+        marker_color=OM_RED,
+        text=[f"${v/1e6:.1f}M" for v in dept_sorted["venta"]],
+        textposition="outside",
+        hovertemplate="<b>%{y}</b><br>Ventas: $%{x:,.0f}<extra></extra>"))
+    fig_dept.add_trace(go.Scatter(
+        x=dept_sorted["margen_pct_pond"], y=dept_sorted["dept_short"],
+        mode="markers+lines", name="Margen %",
+        marker=dict(color=OM_YELLOW, size=10, symbol="diamond"),
+        line=dict(color=OM_YELLOW, width=2, dash="dot"),
+        xaxis="x2",
+        hovertemplate="<b>%{y}</b><br>Margen: %{x:.1f}%<extra></extra>"))
+    fig_dept.update_layout(
+        title="Ventas totales (barras) y margen ponderado % (línea amarilla) por departamento",
+        plot_bgcolor="white", paper_bgcolor="white",
+        height=max(380, len(dept)*30+80),
+        margin=dict(t=55,b=20,l=10,r=80),
+        xaxis=dict(title="Ventas ($)", side="bottom"),
+        xaxis2=dict(title="Margen %", overlaying="x", side="top",
+                    showgrid=False, ticksuffix="%"),
+        legend=dict(orientation="h", y=1.12),
+        yaxis=dict(autorange=True))
+    st.plotly_chart(fig_dept, use_container_width=True)
 
-    # Store performance
-    section("🏪 Desempeño por tienda (Top 20)")
+    # Store performance — Fix 7: geographic map
+    section("🗺️ Distribución geográfica de tiendas")
+    st.caption("Tamaño = margen · Color = ventas totales")
     stores = agg["stores"]
-    sc1,sc2 = st.columns(2)
-    with sc1:
-        fig = go.Figure(go.Bar(
-            x=stores["label"], y=stores["venta"],
-            marker=dict(color=stores["margen_pct"], colorscale=[[0,OM_RED],[0.5,OM_AMBER],[1,OM_GREEN]],
-                        colorbar=dict(title="Margen %")),
-            hovertemplate="<b>%{x}</b><br>Ventas: $%{y:,.0f}<br>Margen: %{marker.color:.1f}%<extra></extra>"))
-        fig.update_layout(title="Top 20 tiendas por ventas (color = margen)",
-                          xaxis=dict(tickangle=55, tickfont=dict(size=9)),
-                          plot_bgcolor="white", paper_bgcolor="white",
-                          height=380, margin=dict(t=45,b=80,l=20,r=20))
-        st.plotly_chart(fig, use_container_width=True)
-    with sc2:
-        fig = px.scatter(stores, x="venta", y="margen_pct", size="unidades", text="store_nbr",
-                         title="Ventas vs Margen",
-                         labels={"venta":"Ventas ($)","margen_pct":"Margen (%)","store_nbr":"Tienda"},
-                         color="margen_pct", color_continuous_scale=[[0,OM_RED],[0.5,OM_AMBER],[1,OM_GREEN]])
-        fig.update_traces(textposition="top center", textfont_size=8,
-                          hovertemplate="<b>%{text}</b><br>Ventas: $%{x:,.0f}<br>Margen: %{y:.1f}%<extra></extra>")
-        fig.update_layout(coloraxis_showscale=False)
-        st.plotly_chart(_layout(fig, h=380), use_container_width=True)
+    CITY_COORDS = {
+        "PACHUCA":(20.1011,-98.7591),"LOMASVERDES":(19.5100,-99.2400),
+        "SATELITE":(19.5300,-99.2300),"INTERLOMAS":(19.3900,-99.2800),
+        "PERISUR":(19.2960,-99.1710),"INSURGENTES":(19.3700,-99.1800),
+        "ALTAVISTA":(19.3500,-99.1900),"POLANCO":(19.4333,-99.1953),
+        "SANTAFE":(19.3600,-99.2600),"SANTA":(19.3600,-99.2600),
+        "PEDREGAL":(19.3200,-99.2200),"TOREO":(19.4500,-99.2600),
+        "COYOACAN":(19.3467,-99.1617),"TEPEYAC":(19.4900,-99.1100),
+        "XOCHIMILCO":(19.2600,-99.1000),"TLALPAN":(19.2900,-99.1600),
+        "ECATEPEC":(19.6010,-99.0600),"NAUCALPAN":(19.4800,-99.2400),
+        "TOLUCA":(19.2826,-99.6557),"QUERETARO":(20.5888,-100.3899),
+        "GUADALAJARA":(20.6597,-103.3496),"MONTERREY":(25.6866,-100.3161),
+        "PUEBLA":(19.0413,-98.2062),"MERIDA":(20.9674,-89.5926),
+        "CANCUN":(21.1619,-86.8515),"VILLAHERMOSA":(17.9869,-92.9303),
+        "VERACRUZ":(19.1738,-96.1342),"TIJUANA":(32.5027,-117.0037),
+        "CHIHUAHUA":(28.6353,-106.0889),"CULIACAN":(24.8091,-107.3940),
+        "HERMOSILLO":(29.0729,-110.9559),"LEON":(21.1221,-101.6820),
+        "MORELIA":(19.7060,-101.1950),"AGUASCALIENTES":(21.8818,-102.2918),
+        "SALTILLO":(25.4232,-100.9963),"TORREON":(25.5428,-103.4068),
+        "JUAREZ":(31.7381,-106.4870),"LAZARO":(17.9333,-102.2000),
+        "CUERNAVACA":(18.9242,-99.2216),"OAXACA":(17.0654,-96.7236),
+        "TUXTLA":(16.7500,-93.1167),"XALAPA":(19.5438,-96.9102),
+        "DURANGO":(24.0277,-104.6532),"TEPIC":(21.5044,-104.8953),
+        "COLIMA":(19.2433,-103.7278),"CAMPECHE":(19.8458,-90.5258),
+        "ZACATECAS":(22.7709,-102.5832),"GUANAJUATO":(21.0190,-101.2574),
+        "IRAPUATO":(20.6778,-101.3554),"CELAYA":(20.5232,-100.8149),
+    }
+    def _extract_city(store_nm):
+        parts = str(store_nm).upper().replace("-","_").split("_")
+        return parts[-1].strip() if parts else ""
+    stores["ciudad"] = stores["store_nm"].apply(_extract_city)
+    stores["lat"] = stores["ciudad"].map(lambda c: CITY_COORDS.get(c, (None,None))[0])
+    stores["lon"] = stores["ciudad"].map(lambda c: CITY_COORDS.get(c, (None,None))[1])
+    geo_df = stores.dropna(subset=["lat","lon"]).copy()
+    if len(geo_df) > 0:
+        geo_df["size_val"] = (geo_df["margen_pct"].clip(lower=0) + 1) * 8
+        fig_map = px.scatter_mapbox(
+            geo_df, lat="lat", lon="lon",
+            color="venta", size="size_val",
+            hover_name="store_nm",
+            hover_data={"venta":":$,.0f","margen_pct":":.1f","n_skus":True,"lat":False,"lon":False,"size_val":False},
+            color_continuous_scale=["#FFCDD2", OM_RED],
+            mapbox_style="carto-positron",
+            zoom=4.5, center={"lat":23.6345,"lon":-102.5528},
+            title="🗺️ Distribución geográfica de tiendas",
+            labels={"venta":"Ventas ($)","margen_pct":"Margen %","n_skus":"SKUs"})
+        fig_map.update_layout(height=480, margin=dict(t=45,b=10,l=10,r=10),
+                              paper_bgcolor="white",
+                              coloraxis_colorbar=dict(title="Ventas $"))
+        st.plotly_chart(fig_map, use_container_width=True)
+    else:
+        st.info("No se encontraron coordenadas para las tiendas en este filtro. Verifica que los nombres de tienda sigan el patrón NUM_TIENDA_CIUDAD.")
+    # Scatter ventas vs margen (mantener como referencia tabular)
+    with st.expander("📋 Ver tabla detallada de tiendas", expanded=False):
+        st.dataframe(stores[["store_nm","venta","margen_pct","unidades","n_skus"]].rename(columns={
+            "store_nm":"Tienda","venta":"Ventas ($)","margen_pct":"Margen %",
+            "unidades":"Unidades","n_skus":"SKUs únicos"
+        }).head(20), hide_index=True, use_container_width=True)
 
     # Top SKUs
     section("🏆 Top productos")
@@ -1418,65 +1522,108 @@ with tab2:
         fig.update_yaxes(tickfont=dict(size=9))
         st.plotly_chart(_layout(fig,h=440), use_container_width=True)
 
-    # Distributions
-    # Premium
-    section("⭐ Premium vs No Premium")
-    prem = agg["prem"]
-    pm1,pm2,pm3 = st.columns(3)
-    for col_w, metric, lbl, pfx in [
-        (pm1,"venta","Venta total ($)","$"),
-        (pm2,"precio_prom","Precio promedio ($)","$"),
-        (pm3,"margen_pct","Margen promedio (%)",""),
-    ]:
-        vals = prem[metric].tolist()
-        fig = px.bar(prem, x="tipo", y=metric, title=lbl,
-                     color="tipo", color_discrete_map={"No Premium":OM_BLUE,"Premium":OM_RED})
-        suf = "%" if pfx=="" else ""
-        fig.update_traces(text=[f"{pfx}{v:,.1f}{suf}" for v in vals], textposition="outside",
-                          hovertemplate="<b>%{x}</b><br>"+lbl+": %{y:,.2f}<extra></extra>")
-        fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="")
-        col_w.plotly_chart(_layout(fig,h=260), use_container_width=True)
+    # Fix 4 — Weighted margin over time (replaces Premium section)
+    section("📈 Evolución del margen promedio ponderado")
+    st.caption("Margen bruto mensual como % de las ventas totales")
+    margen_ts = agg["margen_ts"]
+    if len(margen_ts) > 1:
+        avg_margen = margen_ts["margen_pct"].mean()
+        last_val   = margen_ts["margen_pct"].iloc[-1]
+        last_mes   = margen_ts["mes_str"].iloc[-1]
+        fig_mg = go.Figure()
+        fig_mg.add_trace(go.Scatter(
+            x=margen_ts["mes_str"], y=margen_ts["margen_pct"],
+            mode="lines+markers", name="Margen %",
+            line=dict(color=OM_RED, width=2.5),
+            marker=dict(size=5, color=OM_RED),
+            fill="tozeroy", fillcolor="rgba(227,24,55,0.10)",
+            hovertemplate="<b>%{x}</b><br>Margen: %{y:.2f}%<extra></extra>"))
+        fig_mg.add_hline(y=avg_margen, line_dash="dash", line_color="#555",
+                         annotation_text=f"Promedio: {avg_margen:.1f}%",
+                         annotation_position="top left")
+        fig_mg.add_annotation(x=last_mes, y=last_val,
+                              text=f"{last_val:.1f}%", showarrow=True,
+                              arrowhead=2, font=dict(color=OM_RED, size=12))
+        fig_mg.update_layout(plot_bgcolor="white", paper_bgcolor="white",
+                             height=280, margin=dict(t=30,b=30,l=40,r=20),
+                             xaxis=dict(tickangle=45, title=""),
+                             yaxis=dict(title="Margen %", ticksuffix="%"),
+                             showlegend=False)
+        st.plotly_chart(fig_mg, use_container_width=True)
 
-    # Brand type
+    # Fix 5 — Marca: stat cards + grouped bar
     marca = agg["marca"]
     if len(marca) > 0:
         section("🏷️ Marca Propia vs Marca Externa")
-        mb1,mb2 = st.columns(2)
-        with mb1:
-            fig = px.bar(marca, x="tipo_marca", y="venta", title="Venta por tipo de marca",
-                         color="tipo_marca", color_discrete_sequence=[OM_RED,OM_BLUE,OM_GREEN])
-            fig.update_traces(text=[f"${v/1e3:,.0f}K" for v in marca["venta"]], textposition="outside",
-                              hovertemplate="<b>%{x}</b><br>Ventas: $%{y:,.0f}<extra></extra>")
-            fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="Ventas ($)")
-            st.plotly_chart(_layout(fig,h=280), use_container_width=True)
-        with mb2:
-            fig = px.bar(marca, x="tipo_marca", y="margen_pct", title="Margen por tipo de marca",
-                         color="tipo_marca", color_discrete_sequence=[OM_GREEN,OM_AMBER,OM_BLUE])
-            fig.update_traces(text=[f"{v:.1f}%" for v in marca["margen_pct"]], textposition="outside",
-                              hovertemplate="<b>%{x}</b><br>Margen: %{y:.1f}%<extra></extra>")
-            fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="Margen (%)")
-            st.plotly_chart(_layout(fig,h=280), use_container_width=True)
+        marca_colors = [OM_RED, "#555555", OM_AMBER, OM_BLUE]
+        # Stat cards
+        mc_cols = st.columns(len(marca))
+        for i, (_, mrow) in enumerate(marca.iterrows()):
+            border_c = OM_RED if i == 0 else "#555555"
+            mc_cols[i].markdown(
+                f'<div style="background:white;border-radius:12px;border-left:5px solid {border_c};'
+                f'padding:18px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.07);margin-bottom:12px;">'
+                f'<div style="font-size:13px;font-weight:700;color:{border_c};margin-bottom:10px;">'
+                f'{mrow["tipo_marca"]}</div>'
+                f'<div style="font-size:12px;color:#555;line-height:2.2;">'
+                f'<b>Ventas:</b> ${mrow["venta"]/1e6:.1f}M<br>'
+                f'<b>Margen:</b> {mrow["margen_pct"]:.1f}%<br>'
+                f'<b>SKUs:</b> {int(mrow["n_skus"]):,}<br>'
+                f'<b>Ticket prom.:</b> ${mrow["ticket_prom"]:,.0f}'
+                f'</div></div>', unsafe_allow_html=True)
+        # Grouped bar chart
+        fig_mb = go.Figure()
+        metrics = [("venta","Ventas ($)","$"),("margen_pct","Margen (%)","")]
+        for col_key, col_lbl, pfx in metrics:
+            fmt_vals = [f"${v/1e6:.1f}M" if pfx=="$" else f"{v:.1f}%" for v in marca[col_key]]
+            fig_mb.add_trace(go.Bar(
+                x=marca["tipo_marca"], y=marca[col_key],
+                name=col_lbl,
+                text=fmt_vals, textposition="outside",
+                hovertemplate=f"<b>%{{x}}</b><br>{col_lbl}: %{{y:,.1f}}<extra></extra>"))
+        fig_mb.update_layout(barmode="group", plot_bgcolor="white", paper_bgcolor="white",
+                             height=280, margin=dict(t=30,b=20,l=20,r=20),
+                             showlegend=True, legend=dict(orientation="h", y=1.1))
+        st.plotly_chart(fig_mb, use_container_width=True)
 
-    # Seasonality — ordered correctly
+    # Fix 8b — Seasonality: filled area chart + treemap
     section("📆 Estacionalidad — promedio por mes del año")
     seas = agg["seas"]
-    se1,se2 = st.columns(2)
+    se1, se2 = st.columns(2)
     with se1:
-        fig = px.line(seas, x="mes_nombre", y="venta_prom", title="Venta promedio por mes del año",
-                      labels={"mes_nombre":"","venta_prom":"Venta promedio ($)"},
-                      markers=True, color_discrete_sequence=[OM_RED],
-                      category_orders={"mes_nombre":MONTH_ORDER})
-        fig.update_traces(hovertemplate="<b>%{x}</b><br>Venta promedio: $%{y:,.0f}<extra></extra>")
-        fig.update_layout(showlegend=False)
-        st.plotly_chart(_layout(fig,h=280), use_container_width=True)
+        # Filled area (Fix 8b-a)
+        seas_ordered = seas.set_index("mes_nombre").reindex(
+            [m for m in MONTH_ORDER if m in seas["mes_nombre"].values]).reset_index()
+        fig_seas = go.Figure()
+        fig_seas.add_trace(go.Scatter(
+            x=seas_ordered["mes_nombre"], y=seas_ordered["venta_prom"],
+            mode="lines+markers", fill="tozeroy",
+            line=dict(color=OM_RED, width=2.5),
+            fillcolor=f"rgba(227,24,55,0.18)",
+            marker=dict(size=7, color=OM_RED),
+            hovertemplate="<b>%{x}</b><br>Venta promedio: $%{y:,.0f}<extra></extra>"))
+        fig_seas.update_layout(
+            title="Venta promedio por mes del año",
+            plot_bgcolor="white", paper_bgcolor="white",
+            height=280, margin=dict(t=40,b=20,l=40,r=20),
+            xaxis=dict(title="", categoryorder="array", categoryarray=MONTH_ORDER),
+            yaxis=dict(title="Venta promedio ($)"), showlegend=False)
+        st.plotly_chart(fig_seas, use_container_width=True)
     with se2:
-        fig = px.bar(seas, x="mes_nombre", y="unidades_prom", title="Unidades promedio por mes del año",
-                     labels={"mes_nombre":"","unidades_prom":"Unidades promedio"},
-                     color_discrete_sequence=[OM_BLUE],
-                     category_orders={"mes_nombre":MONTH_ORDER})
-        fig.update_traces(hovertemplate="<b>%{x}</b><br>Unidades promedio: %{y:,.1f}<extra></extra>")
-        fig.update_layout(showlegend=False)
-        st.plotly_chart(_layout(fig,h=280), use_container_width=True)
+        # Treemap dept share (Fix 8b-b)
+        dept_tree = agg["dept"].copy()
+        fig_tree = px.treemap(dept_tree, path=["dept_short"], values="venta",
+                              color="margen_pct_pond",
+                              color_continuous_scale=["#FFCDD2", OM_RED],
+                              title="Participación y margen por departamento",
+                              labels={"margen_pct_pond":"Margen %","venta":"Ventas ($)"})
+        fig_tree.update_traces(
+            hovertemplate="<b>%{label}</b><br>Ventas: $%{value:,.0f}<br>Margen: %{color:.1f}%<extra></extra>",
+            textinfo="label+percent entry")
+        fig_tree.update_layout(height=280, margin=dict(t=40,b=10,l=10,r=10),
+                               paper_bgcolor="white",
+                               coloraxis_colorbar=dict(title="Margen %"))
+        st.plotly_chart(fig_tree, use_container_width=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1523,13 +1670,15 @@ with tab3:
     _precio_feats = {"Log Precio","% Descuento vs modal","Precio vs Catálogo","Cambio precio % (mes ant.)"}
     _precio_pct = f"{float(_ml_kpi['feat_df'][_ml_kpi['feat_df']['feature'].isin(_precio_feats)]['importancia'].sum())*100:.0f}%" if _ml_kpi else "—"
 
-    pk = st.columns(6)
-    kpi(pk[0], "Productos con recomendación", f"{n_validos} ({pct_valid:.0f}%)", OM_RED)
-    kpi(pk[1], "✅ Sube el precio",            f"{n_subir} productos",            OM_BLUE)
-    kpi(pk[2], "📢 Lanza una promoción",       f"{n_promover} productos",         OM_GREEN)
-    kpi(pk[3], "➡️ Mantén el precio",          f"{n_mantener} productos",         OM_AMBER)
-    kpi(pk[4], "Impacto anualizado estimado",  f"+${_imp_total_anual:,.0f}",      OM_RED)
-    kpi(pk[5], "El precio explica la demanda", _precio_pct,                       OM_BLUE)
+    # 2 rows of 3 (Fix 3)
+    pk1 = st.columns(3)
+    kpi(pk1[0], "Productos con recomendación", f"{n_validos} ({pct_valid:.0f}%)", OM_RED)
+    kpi(pk1[1], "✅ Sube el precio",            f"{n_subir} productos",            OM_BLUE)
+    kpi(pk1[2], "📢 Lanza una promoción",       f"{n_promover} productos",         OM_GREEN)
+    pk2 = st.columns(3)
+    kpi(pk2[0], "➡️ Mantén el precio",          f"{n_mantener} productos",         OM_AMBER)
+    kpi(pk2[1], "Impacto anualizado estimado",  f"+${_imp_total_anual:,.0f}",      OM_RED)
+    kpi(pk2[2], "El precio explica la demanda", _precio_pct,                       OM_BLUE)
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Resumen ejecutivo con IA — AL INICIO para ejecutivos ─────────────────
@@ -1666,26 +1815,45 @@ with tab3:
                 "🔵 Historial de demanda":    {"Ventas mes anterior (log)","Media ventas 3m (log)"},
                 "⚫ Contexto de mercado":     {"Mes del año","Tendencia temporal","Departamento","Es Premium"},
             }
-            grp_imp = {}
-            for grp_nm, feats in grupos.items():
-                grp_imp[grp_nm] = float(feat_df[feat_df["feature"].isin(feats)]["importancia"].sum())
-            grp_df = pd.DataFrame({"Grupo": list(grp_imp.keys()),
-                                    "Importancia": list(grp_imp.values())}).sort_values("Importancia", ascending=True)
+            # Fix 11 — normalize group sums to exactly 100%
+            FEAT_GROUPS = {
+                "🔴 Precio (controlable)": {"log_precio","pct_desc","precio_vs_cat","precio_chg_pct"},
+                "🔵 Historial de demanda": {"log_uds_lag1","log_uds_roll3m"},
+                "⚫ Contexto de mercado":  {"mes_cal","mes_num","es_premium","dept_enc"},
+            }
+            raw_feat_df = ml_res["feat_df"].copy()
+            # map display names → internal names for lookup
+            FEAT_NAME_MAP = {
+                "Log Precio":"log_precio","% Descuento vs modal":"pct_desc",
+                "Precio vs Catálogo":"precio_vs_cat","Cambio precio % (mes ant.)":"precio_chg_pct",
+                "Ventas mes anterior (log)":"log_uds_lag1","Media ventas 3m (log)":"log_uds_roll3m",
+                "Mes del año":"mes_cal","Tendencia temporal":"mes_num",
+                "Es Premium":"es_premium","Departamento":"dept_enc",
+            }
+            raw_feat_df["feat_key"] = raw_feat_df["feature"].map(FEAT_NAME_MAP).fillna(raw_feat_df["feature"])
+            grp_imp_raw = {}
+            for grp_nm, feat_keys in FEAT_GROUPS.items():
+                grp_imp_raw[grp_nm] = float(raw_feat_df[raw_feat_df["feat_key"].isin(feat_keys)]["importancia"].sum())
+            total_imp = sum(grp_imp_raw.values()) or 1.0
+            grp_imp_norm = {k: v/total_imp for k,v in grp_imp_raw.items()}
+            grp_df = pd.DataFrame({"Grupo": list(grp_imp_norm.keys()),
+                                    "Pct": list(grp_imp_norm.values())}).sort_values("Pct", ascending=True)
             colors_grp = [OM_LGRAY, OM_BLUE, OM_RED]
+            grp_df_vals = [v*100 for v in grp_df["Pct"]]
             fig_fi = go.Figure(go.Bar(
-                x=grp_df["Importancia"] * 100,
+                x=grp_df_vals,
                 y=grp_df["Grupo"],
                 orientation="h",
                 marker_color=colors_grp,
-                text=[f"{v*100:.1f}%" for v in grp_df["Importancia"]],
+                text=[f"{v:.1f}%" for v in grp_df_vals],
                 textposition="outside",
                 hovertemplate="<b>%{y}</b><br>Importancia: %{x:.1f}%<extra></extra>"))
-            precio_total = grp_imp.get("🔴 Precio (controlable)", 0) * 100
+            precio_total = grp_imp_norm.get("🔴 Precio (controlable)", 0) * 100
             fig_fi.update_layout(
-                title=f"Importancia de variables — {ganador} (🔴 = features de precio: {precio_total:.0f}%)",
+                title=f"¿Qué impulsa la demanda? — Precio controlable: {precio_total:.0f}% de los factores accionables",
                 plot_bgcolor="white", paper_bgcolor="white",
-                height=300, margin=dict(t=45,b=10,l=10,r=60),
-                xaxis=dict(title="Importancia (%)", range=[0, feat_df["importancia"].max()*115]),
+                height=300, margin=dict(t=55,b=10,l=10,r=80),
+                xaxis=dict(title="Importancia normalizada (%)", range=[0, max(grp_df_vals)*1.25]),
                 yaxis=dict(autorange="reversed"))
             st.plotly_chart(fig_fi, use_container_width=True)
 
@@ -1741,20 +1909,21 @@ with tab3:
                     st.plotly_chart(fig_bar, use_container_width=True)
 
             with pb2:
-                # Heatmap departamento × mes (compacto)
+                # Fix 12 — heatmap with high-contrast scale, bigger fonts
                 fig_dh = go.Figure(data=go.Heatmap(
                     z=dept_pivot.values,
                     x=list(dept_pivot.columns),
                     y=[d[:22] for d in dept_pivot.index],
-                    colorscale=[[0,"#EF5350"],[0.45,"#FFF9C4"],[1,"#43A047"]],
-                    zmid=0,
+                    colorscale="RdYlGn",
+                    zmin=0,
                     hovertemplate="<b>%{y}</b><br>%{x}: %{z:.1f}% uplift<extra></extra>",
-                    showscale=False))
+                    showscale=True,
+                    colorbar=dict(title="Uplift %<br>vs sin promo", titlefont=dict(size=11))))
                 fig_dh.update_layout(
-                    height=380, margin=dict(t=30,b=10,l=10,r=10),
+                    height=500, margin=dict(t=30,b=10,l=10,r=80),
                     paper_bgcolor="white", plot_bgcolor="white",
-                    xaxis=dict(side="top", tickfont=dict(size=10)),
-                    yaxis=dict(tickfont=dict(size=9)))
+                    xaxis=dict(side="top", tickfont=dict(size=12)),
+                    yaxis=dict(tickfont=dict(size=12)))
                 st.plotly_chart(fig_dh, use_container_width=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -1773,6 +1942,65 @@ with tab3:
             unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
+
+    # Fix 9 — SKU scatter: beta vs financial impact
+    if len(df_sim) > 0:
+        _scatter_base = df_sim[df_sim["cambio"]=="Base 0%"][["prod_nm","ingreso_est"]].copy()
+        _scatter_best = df_sim[df_sim["cambio"].isin(["+10%","-10%"])].copy()
+        _scatter_best = _scatter_best.groupby("prod_nm").apply(
+            lambda g: g.loc[(g["ingreso_est"] - _scatter_base.set_index("prod_nm").reindex(g["prod_nm"])["ingreso_est"].values).abs().idxmax()]
+            if len(g) > 0 else g.iloc[0]).reset_index(drop=True) if len(_scatter_best) > 0 else pd.DataFrame()
+        _scat_df = df_m1a[["prod_nm","prod_nbr","beta","pval","recomendacion"]].copy()
+        _scat_base = df_sim[df_sim["cambio"]=="Base 0%"][["prod_nm","ingreso_est","precio_nuevo","unidades_est"]].copy()
+        _best_esc = df_sim.copy()
+        _best_esc["abs_delta"] = _best_esc["delta_ingreso_pct"].abs()
+        _best_per_sku = _best_esc.sort_values("abs_delta",ascending=False).drop_duplicates("prod_nm")
+        _scat_df = _scat_df.merge(_scat_base.rename(columns={"ingreso_est":"ingreso_base","precio_nuevo":"precio_actual","unidades_est":"uds_base"}), on="prod_nm", how="left")
+        _scat_df = _scat_df.merge(_best_per_sku[["prod_nm","cambio","delta_ingreso_pct"]].rename(columns={"cambio":"mejor_esc","delta_ingreso_pct":"impacto_pct"}), on="prod_nm", how="left")
+        _scat_df["impacto_mes"] = (_scat_df["ingreso_base"] * _scat_df["impacto_pct"].fillna(0) / 100).fillna(0)
+        _rec_colors_scatter = {
+            "Subir precio":     OM_RED,
+            "Mantener precio":  "#FFA500",
+            "Bajar / Promover": "#2196F3",
+            "No recomendable":  OM_LGRAY,
+        }
+        section("🎯 Priorización de productos: sensibilidad al precio vs impacto financiero")
+        st.caption("Los productos en la esquina inferior izquierda son muy sensibles al precio y de alto impacto — prioriza sus promociones.")
+        fig_scat = go.Figure()
+        for rec_s, grp_s in _scat_df.groupby("recomendacion"):
+            fig_scat.add_trace(go.Scatter(
+                x=grp_s["beta"], y=grp_s["impacto_mes"],
+                mode="markers", name=rec_s,
+                marker=dict(size=10, color=_rec_colors_scatter.get(rec_s, OM_LGRAY), opacity=0.8,
+                            line=dict(width=1, color="white")),
+                hovertemplate=(
+                    "<b>%{customdata[0]}</b><br>"
+                    "Índice sensibilidad (β): %{x:.3f}<br>"
+                    "Impacto estimado: $%{y:,.0f}/mes<br>"
+                    "p-valor: %{customdata[1]:.4f}<br>"
+                    "Recomendación: %{customdata[2]}<extra></extra>"),
+                customdata=grp_s[["prod_nm","pval","recomendacion"]].values))
+        fig_scat.add_vline(x=-1.0,  line_dash="dash", line_color="#888", opacity=0.7)
+        fig_scat.add_vline(x=-1.5,  line_dash="dot",  line_color="#888", opacity=0.6)
+        fig_scat.add_annotation(x=-0.5, y=_scat_df["impacto_mes"].max()*0.92,
+                                text="Inelástico<br>→ Sube precio", showarrow=False,
+                                font=dict(size=11, color="#555"), bgcolor="rgba(255,255,255,0.8)")
+        fig_scat.add_annotation(x=-1.25, y=_scat_df["impacto_mes"].max()*0.92,
+                                text="Unitario<br>→ Mantén", showarrow=False,
+                                font=dict(size=11, color="#555"), bgcolor="rgba(255,255,255,0.8)")
+        fig_scat.add_annotation(x=-2.2, y=_scat_df["impacto_mes"].max()*0.92,
+                                text="Elástico<br>→ Promociona", showarrow=False,
+                                font=dict(size=11, color="#555"), bgcolor="rgba(255,255,255,0.8)")
+        fig_scat.update_layout(
+            plot_bgcolor="white", paper_bgcolor="white",
+            height=380, margin=dict(t=30,b=40,l=50,r=20),
+            xaxis=dict(title="Índice de sensibilidad al precio (β)",
+                       gridcolor="#F0F0F0", zeroline=True, zerolinecolor="#CCC"),
+            yaxis=dict(title="Impacto financiero estimado ($/mes)",
+                       gridcolor="#F0F0F0", tickprefix="$"),
+            legend=dict(orientation="h", y=1.1))
+        st.plotly_chart(fig_scat, use_container_width=True)
+        st.markdown("<br>", unsafe_allow_html=True)
 
     # Mini gráfica de distribución de betas + donut lado a lado
     mg1, mg2 = st.columns([3,2])
@@ -1796,6 +2024,37 @@ with tab3:
                           margin=dict(t=40,b=10,l=10,r=10))
         st.plotly_chart(fig, use_container_width=True)
 
+
+    # Fix 10 — Impact KPIs moved here (right after Paso 2 / OLS section)
+    if len(df_sim) > 0:
+        _sub_pool = df_m1a[df_m1a["recomendacion"]=="Subir precio"]["prod_nm"].tolist()
+        _prm_pool = df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"]["prod_nm"].tolist()
+
+        def _delta_rev(nms, esc):
+            base = df_sim[(df_sim["prod_nm"].isin(nms)) & (df_sim["cambio"]=="Base 0%")]["ingreso_est"].sum()
+            best = df_sim[(df_sim["prod_nm"].isin(nms)) & (df_sim["cambio"]==esc)]["ingreso_est"].sum()
+            return best - base
+
+        def _delta_uds(nms, esc):
+            base = df_sim[(df_sim["prod_nm"].isin(nms)) & (df_sim["cambio"]=="Base 0%")]["unidades_est"].sum()
+            best = df_sim[(df_sim["prod_nm"].isin(nms)) & (df_sim["cambio"]==esc)]["unidades_est"].sum()
+            return best - base
+
+        _ing_sub = _delta_rev(_sub_pool, "+10%")
+        _ing_prm = _delta_rev(_prm_pool, "-10%")
+        _uds_prm = _delta_uds(_prm_pool, "-10%")
+        _total   = _ing_sub + _ing_prm
+
+        section("💰 Impacto potencial de negocio — si implementas las recomendaciones")
+        st.caption("Estimación del modelo con los datos actuales. Con más historial, la precisión aumenta.")
+        _ic1, _ic2, _ic3, _ic4 = st.columns(4)
+        kpi(_ic1, f"Subir precio — {len(_sub_pool)} prod. (+10%)",
+            f"+${_ing_sub:,.0f}/mes", OM_BLUE)
+        kpi(_ic2, f"Promover — {len(_prm_pool)} prod. (-10%)",
+            f"+${_ing_prm:,.0f}/mes" if _ing_prm >= 0 else f"${_ing_prm:,.0f}/mes", OM_GREEN)
+        kpi(_ic3, "Unidades extra por promos", f"+{_uds_prm:,.0f}/mes", OM_AMBER)
+        kpi(_ic4, "Impacto total anualizado",  f"+${_total*12:,.0f}/año", OM_RED)
+        st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Selector: general o por producto ─────────────────────────────────────
     section("🔍 Análisis por producto")
@@ -1918,38 +2177,6 @@ with tab3:
             st.plotly_chart(_layout(fig, h=320), use_container_width=True)
 
         st.stop()
-
-    # ── Impacto de negocio estimado ───────────────────────────────────────────
-    section("💰 Impacto potencial de negocio — si implementas las recomendaciones")
-    st.caption("Estimación del modelo con los datos actuales. Con más historial, la precisión aumenta.")
-
-    if len(df_sim) > 0:
-        _sub_pool = df_m1a[df_m1a["recomendacion"]=="Subir precio"]["prod_nm"].tolist()
-        _prm_pool = df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"]["prod_nm"].tolist()
-
-        def _delta_rev(nms, esc):
-            base = df_sim[(df_sim["prod_nm"].isin(nms)) & (df_sim["cambio"]=="Base 0%")]["ingreso_est"].sum()
-            best = df_sim[(df_sim["prod_nm"].isin(nms)) & (df_sim["cambio"]==esc)]["ingreso_est"].sum()
-            return best - base
-
-        def _delta_uds(nms, esc):
-            base = df_sim[(df_sim["prod_nm"].isin(nms)) & (df_sim["cambio"]=="Base 0%")]["unidades_est"].sum()
-            best = df_sim[(df_sim["prod_nm"].isin(nms)) & (df_sim["cambio"]==esc)]["unidades_est"].sum()
-            return best - base
-
-        _ing_sub  = _delta_rev(_sub_pool, "+10%")
-        _ing_prm  = _delta_rev(_prm_pool, "-10%")
-        _uds_prm  = _delta_uds(_prm_pool, "-10%")
-        _total    = _ing_sub + _ing_prm
-
-        _ic1, _ic2, _ic3, _ic4 = st.columns(4)
-        kpi(_ic1, f"Subir precio — {len(_sub_pool)} SKUs (+10%)",
-            f"+${_ing_sub:,.0f}/mes", OM_BLUE)
-        kpi(_ic2, f"Promover — {len(_prm_pool)} SKUs (-10%)",
-            f"+${_ing_prm:,.0f}/mes" if _ing_prm >= 0 else f"${_ing_prm:,.0f}/mes", OM_GREEN)
-        kpi(_ic3, "Unidades extra por promos", f"+{_uds_prm:,.0f}/mes", OM_AMBER)
-        kpi(_ic4, "Impacto total anualizado",  f"+${_total*12:,.0f}/año", OM_RED)
-        st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Calendario mensual de acciones ────────────────────────────────────────
     section("📅 ¿En qué meses actuar? — Calendario de acciones")
@@ -2164,12 +2391,18 @@ with tab3:
                    "🟡 Amarillo = subió durante pero volvió a normal  |  "
                    "🔴 Rojo = cayó después (el cliente solo compró por el descuento, no se fidelizó)")
 
+        # Fix 13 — clean number formatting for display copy only
         show_eval = _promo_eval[[
             "prod_nm","dept_nm","desc_pct",
             "uds_pre","uds_dur","uds_post",
             "up_dur","up_post","rv_up",
             "rentable","retencion"
         ]].copy()
+        # Round unit columns to int, pct to 1 decimal
+        for _uc in ["uds_pre","uds_dur","uds_post"]:
+            show_eval[_uc] = pd.to_numeric(show_eval[_uc], errors="coerce").round(0).astype("Int64")
+        for _pc in ["up_dur","up_post","rv_up","desc_pct"]:
+            show_eval[_pc] = pd.to_numeric(show_eval[_pc], errors="coerce").round(1)
         show_eval.columns = [
             "Producto","Departamento","Descuento %",
             "Uds ANTES","Uds DURANTE","Uds DESPUÉS",
@@ -2187,7 +2420,7 @@ with tab3:
             return [f"background-color:{c}"]*len(row)
 
         fmt = {"Descuento %":"{:.1f}%","Uplift uds %":"{:+.1f}%",
-               "Uplift ventas %":"{:+.1f}%"}
+               "Uplift ventas %":"{:+.1f}%","Post-promo %":"{:+.1f}%"}
         st.dataframe(
             show_eval.style.apply(_color_promo, axis=1).format(fmt, na_rep="—"),
             use_container_width=True, height=320, hide_index=True)

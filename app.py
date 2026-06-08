@@ -104,25 +104,53 @@ html, body, [class*="css"] { font-family: 'Roboto', Arial, sans-serif !important
     border-radius:12px; font-size:11px; font-weight:700; }
 .insight-box { background:#FFF8E1; border-left:4px solid #FFD100; border-radius:0 8px 8px 0;
     padding:8px 14px; font-size:13px; color:#333; margin:6px 0 16px 0; }
-/* Fix 1 — file uploader dark sidebar visibility */
-[data-testid="stFileUploader"] {
+/* Fix B — file uploader: force dark background on all inner elements */
+[data-testid="stFileUploaderDropzone"] {
+    background-color: #2C2C2C !important;
+    border: 2px dashed #E31837 !important;
+    border-radius: 10px !important;
+}
+[data-testid="stFileUploaderDropzone"] * {
+    color: #FFFFFF !important;
+    fill: #FFFFFF !important;
+}
+[data-testid="stFileUploaderDropzone"] small,
+[data-testid="stFileUploaderDropzone"] span,
+[data-testid="stFileUploaderDropzone"] p { color: #CCCCCC !important; }
+[data-testid="stFileUploaderDropzone"] svg path { fill: #FFFFFF !important; }
+[data-testid="stFileUploaderDropzone"] button {
+    background-color: #E31837 !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    border-radius: 6px !important;
+}
+[data-testid="stFileUploaderFile"] {
+    background-color: #333333 !important;
+    border: 1px solid #555555 !important;
+    border-radius: 6px !important;
+}
+[data-testid="stFileUploaderFile"] * { color: #FFFFFF !important; }
+/* Fix B — expander dark background */
+[data-testid="stExpander"] > div:first-child {
     background-color: #2C2C2C !important;
     border: 1px solid #555555 !important;
     border-radius: 8px !important;
+    color: #FFFFFF !important;
 }
-[data-testid="stFileUploader"] * { color: #FFFFFF !important; }
-[data-testid="stFileUploader"] svg { fill: #FFFFFF !important; }
-[data-testid="stFileUploader"] small { color: #AAAAAA !important; }
-/* Fix 1 — expander dark background */
-section[data-testid="stSidebar"] [data-testid="stExpander"] {
+details[data-testid="stExpander"] {
     background-color: #2C2C2C !important;
-    border: 1px solid #555555 !important;
+    border: 1px solid #444444 !important;
     border-radius: 8px !important;
 }
-section[data-testid="stSidebar"] [data-testid="stExpander"] * { color: #FFFFFF !important; }
-/* Fix 1 — ensure all sidebar text white */
-section[data-testid="stSidebar"] * { color: #FFFFFF !important; }
-section[data-testid="stSidebar"] .stMarkdown p { color: #DDDDDD !important; }
+details[data-testid="stExpander"] summary { color: #FFFFFF !important; }
+details[data-testid="stExpander"] summary span { color: #FFFFFF !important; }
+details[data-testid="stExpander"] > div { background-color: #2C2C2C !important; }
+/* Fix B — ensure all sidebar text white */
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] span,
+section[data-testid="stSidebar"] div,
+section[data-testid="stSidebar"] small { color: #FFFFFF !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -535,16 +563,13 @@ def _fmt_bar(fig, values, prefix="$", suffix="", decimals=0):
 with st.sidebar:
     # ── Logo ────────────────────────────────────────────────────────────────
     try:
-        st.image("static/officemax-seeklogo.png", width=180)
+        st.image("assets/officemax-logo.png", width=180)
     except Exception:
-        try:
-            st.image("static/logo-officemax.png", width=180)
-        except Exception:
-            st.markdown("""
-            <div class="sidebar-logo-wrap">
-                <span style="font-size:26px;font-weight:900;color:#E31837;">OFFICEMAX</span><br>
-                <span style="font-size:9px;color:#aaa;letter-spacing:2px;">DYNAMIC PRICING ANALYZER</span>
-            </div>""", unsafe_allow_html=True)
+        st.markdown("""
+        <div class="sidebar-logo-wrap">
+            <span style="font-size:26px;font-weight:900;color:#E31837;">OFFICEMAX</span><br>
+            <span style="font-size:9px;color:#aaa;letter-spacing:2px;">DYNAMIC PRICING ANALYZER</span>
+        </div>""", unsafe_allow_html=True)
 
     st.markdown("<hr class='sidebar-divider'>", unsafe_allow_html=True)
 

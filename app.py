@@ -519,8 +519,8 @@ def kpi(col, label, value, color=OM_RED):
         f'padding:20px 16px;text-align:center;min-height:110px;display:flex;'
         f'flex-direction:column;justify-content:center;'
         f'box-shadow:0 2px 8px rgba(0,0,0,0.08);margin-bottom:8px;">'
-        f'<div style="font-size:1.8rem;font-weight:800;color:#1A1A1A;'
-        f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{value}</div>'
+        f'<div style="font-size:clamp(1.2rem,3vw,1.8rem);font-weight:800;color:#1A1A1A;'
+        f'word-break:break-word;overflow-wrap:anywhere;">{value}</div>'
         f'<div style="font-size:0.7rem;font-weight:600;color:#666;text-transform:uppercase;'
         f'letter-spacing:0.05em;margin-top:8px;white-space:nowrap;">{label}</div>'
         f'</div>', unsafe_allow_html=True)
@@ -1448,15 +1448,20 @@ with tab2:
         line=dict(color=OM_YELLOW, width=2, dash="dot"),
         xaxis="x2",
         hovertemplate="<b>%{y}</b><br>Margen: %{x:.1f}%<extra></extra>"))
+    _mg_vals = dept_sorted["margen_pct_pond"].dropna()
+    _mg_min  = float(_mg_vals.min()) if len(_mg_vals) else 0
+    _mg_max  = float(_mg_vals.max()) if len(_mg_vals) else 1
     fig_dept.update_layout(
-        title="Ventas totales (barras) y margen ponderado % (línea amarilla) por departamento",
+        title="Ventas totales (barras) · Margen ponderado % (línea amarilla) por departamento",
         plot_bgcolor="white", paper_bgcolor="white",
-        height=max(380, len(dept)*30+80),
-        margin=dict(t=55,b=20,l=10,r=80),
+        height=max(350, len(dept_sorted) * 90),
+        margin=dict(t=60, b=60, l=220, r=120),
+        bargap=0.35,
         xaxis=dict(title="Ventas ($)", side="bottom"),
         xaxis2=dict(title="Margen %", overlaying="x", side="top",
-                    showgrid=False, ticksuffix="%"),
-        legend=dict(orientation="h", y=1.12),
+                    showgrid=False, ticksuffix="%",
+                    range=[_mg_min * 0.95, _mg_max * 1.05]),
+        legend=dict(orientation="h", y=-0.2),
         yaxis=dict(autorange=True))
     st.plotly_chart(fig_dept, use_container_width=True)
 
@@ -1464,40 +1469,100 @@ with tab2:
     section("🗺️ Distribución geográfica de tiendas")
     st.caption("Tamaño = margen · Color = ventas totales")
     stores = agg["stores"]
+    import re as _re_map, unicodedata as _ud
     CITY_COORDS = {
-        "PACHUCA":(20.1011,-98.7591),"LOMASVERDES":(19.5100,-99.2400),
-        "SATELITE":(19.5300,-99.2300),"INTERLOMAS":(19.3900,-99.2800),
+        "ESTADIO":(19.4033,-99.1529),"REFORMA":(19.4269,-99.1675),
+        "UNIVERSIDAD":(19.3264,-99.1771),"PERINORTE":(19.5667,-99.1333),
+        "TOREO":(19.4500,-99.2600),"SATELITE":(19.5300,-99.2300),
+        "LOMAS":(19.4350,-99.2450),"LOMASVERDES":(19.5100,-99.2400),
+        "INTERLOMAS":(19.3900,-99.2800),"BOSQUES":(19.4100,-99.2700),
+        "PERICOAPA":(19.3200,-99.1800),"COAPA":(19.3100,-99.1600),
+        "COYOACAN":(19.3467,-99.1617),"PEDREGAL":(19.3200,-99.2200),
+        "TEPEYAC":(19.4900,-99.1100),"LINDAVISTA":(19.4900,-99.1300),
+        "VALLEJO":(19.4800,-99.1500),"TACUBAYA":(19.4017,-99.1758),
+        "OBSERVATORIO":(19.3967,-99.1897),"MIXCOAC":(19.3800,-99.1900),
+        "XOCHIMILCO":(19.2600,-99.1000),"TLALPAN":(19.2900,-99.1600),
+        "TLAHUAC":(19.2900,-99.0100),"IZTAPALAPA":(19.3600,-99.0500),
+        "IZTACALCO":(19.3900,-99.1000),"VENUSTIANO":(19.4300,-99.0900),
+        "GUSTAVO":(19.4900,-99.1100),"AZCAPOTZALCO":(19.4900,-99.1900),
+        "CUAJIMALPA":(19.3600,-99.2800),"MAGDALENA":(19.3400,-99.2100),
+        "CONTRERAS":(19.3400,-99.2100),"ALVARO":(19.3600,-99.1600),
+        "MILPA":(19.2200,-99.0300),"ALTA":(19.2200,-99.0300),
+        "ECATEPEC":(19.6010,-99.0600),"NEZAHUALCOYOTL":(19.4000,-99.0167),
+        "CHALCO":(19.2628,-98.8978),"TEXCOCO":(19.5158,-98.8783),
+        "TOLUCA":(19.2826,-99.6557),"METEPEC":(19.2505,-99.5989),
+        "NAUCALPAN":(19.4800,-99.2400),"TLALNEPANTLA":(19.5500,-99.2000),
+        "CUAUTITLAN":(19.6800,-99.1800),"IZCALLI":(19.6800,-99.2200),
+        "CUAUTITLANIZCALLI":(19.6800,-99.2200),"TULTITLAN":(19.6400,-99.1700),
+        "COACALCO":(19.6200,-99.0900),"TECAMAC":(19.7100,-98.9700),
+        "ATIZAPAN":(19.5600,-99.2600),"HUIXQUILUCAN":(19.3600,-99.2900),
+        "NICOLASLOMA":(19.5300,-99.2000),"PACHUCA":(20.1011,-98.7591),
+        "HIDALGO":(20.1011,-98.7591),"TULANCINGO":(20.0853,-98.3622),
+        "QUERETARO":(20.5888,-100.3899),"JURIQUILLA":(20.7100,-100.4400),
+        "CELAYA":(20.5232,-100.8149),"IRAPUATO":(20.6778,-101.3554),
+        "LEON":(21.1221,-101.6820),"SILAO":(20.9361,-101.4325),
+        "SALAMANCA":(20.5697,-101.1956),"GUANAJUATO":(21.0190,-101.2574),
+        "MORELIA":(19.7060,-101.1950),"URUAPAN":(19.4150,-102.0630),
+        "LAZARO":(17.9333,-102.2000),"LAZAROCARDENAS":(17.9333,-102.2000),
+        "AGUASCALIENTES":(21.8818,-102.2918),
+        "GUADALAJARA":(20.6597,-103.3496),"ZAPOPAN":(20.7207,-103.3921),
+        "TLAQUEPAQUE":(20.6419,-103.3166),"TONALA":(20.6239,-103.2344),
+        "TLAJOMULCO":(20.4733,-103.4420),
+        "MONTERREY":(25.6866,-100.3161),"SANPEDRO":(25.6552,-100.4016),
+        "GARZA":(25.8000,-100.2000),"GARCIA":(25.8090,-100.5861),
+        "APODACA":(25.7847,-100.1886),"ESCOBEDO":(25.8000,-100.3200),
+        "SALTILLO":(25.4232,-100.9963),"TORREON":(25.5428,-103.4068),
+        "GOMEZ":(25.5666,-103.4892),"DURANGO":(24.0277,-104.6532),
+        "CHIHUAHUA":(28.6353,-106.0889),"JUAREZ":(31.7381,-106.4870),
+        "CIUDADJUAREZ":(31.7381,-106.4870),"HERMOSILLO":(29.0729,-110.9559),
+        "OBREGON":(27.4863,-109.9307),"CULIACAN":(24.8091,-107.3940),
+        "MAZATLAN":(23.2494,-106.4111),"TEPIC":(21.5044,-104.8953),
+        "COLIMA":(19.2433,-103.7278),"PUEBLA":(19.0413,-98.2062),
+        "CHOLULA":(19.0636,-98.3092),"TLAXCALA":(19.3139,-98.2392),
+        "VERACRUZ":(19.1738,-96.1342),"XALAPA":(19.5438,-96.9102),
+        "ORIZABA":(18.8503,-97.1003),"COATZACOALCOS":(18.1503,-94.4536),
+        "OAXACA":(17.0654,-96.7236),"TUXTLA":(16.7500,-93.1167),
+        "TAPACHULA":(14.9000,-92.2597),"VILLAHERMOSA":(17.9869,-92.9303),
+        "CAMPECHE":(19.8458,-90.5258),"MERIDA":(20.9674,-89.5926),
+        "CANCUN":(21.1619,-86.8515),"PLAYA":(20.6296,-87.0739),
+        "PLAYADELCARMEN":(20.6296,-87.0739),"COZUMEL":(20.5083,-86.9458),
+        "CHETUMAL":(18.5001,-88.2961),"ZACATECAS":(22.7709,-102.5832),
+        "SANLUISPOTOSI":(22.1565,-100.9855),"POTOSI":(22.1565,-100.9855),
         "PERISUR":(19.2960,-99.1710),"INSURGENTES":(19.3700,-99.1800),
         "ALTAVISTA":(19.3500,-99.1900),"POLANCO":(19.4333,-99.1953),
         "SANTAFE":(19.3600,-99.2600),"SANTA":(19.3600,-99.2600),
-        "PEDREGAL":(19.3200,-99.2200),"TOREO":(19.4500,-99.2600),
-        "COYOACAN":(19.3467,-99.1617),"TEPEYAC":(19.4900,-99.1100),
-        "XOCHIMILCO":(19.2600,-99.1000),"TLALPAN":(19.2900,-99.1600),
-        "ECATEPEC":(19.6010,-99.0600),"NAUCALPAN":(19.4800,-99.2400),
-        "TOLUCA":(19.2826,-99.6557),"QUERETARO":(20.5888,-100.3899),
-        "GUADALAJARA":(20.6597,-103.3496),"MONTERREY":(25.6866,-100.3161),
-        "PUEBLA":(19.0413,-98.2062),"MERIDA":(20.9674,-89.5926),
-        "CANCUN":(21.1619,-86.8515),"VILLAHERMOSA":(17.9869,-92.9303),
-        "VERACRUZ":(19.1738,-96.1342),"TIJUANA":(32.5027,-117.0037),
-        "CHIHUAHUA":(28.6353,-106.0889),"CULIACAN":(24.8091,-107.3940),
-        "HERMOSILLO":(29.0729,-110.9559),"LEON":(21.1221,-101.6820),
-        "MORELIA":(19.7060,-101.1950),"AGUASCALIENTES":(21.8818,-102.2918),
-        "SALTILLO":(25.4232,-100.9963),"TORREON":(25.5428,-103.4068),
-        "JUAREZ":(31.7381,-106.4870),"LAZARO":(17.9333,-102.2000),
-        "CUERNAVACA":(18.9242,-99.2216),"OAXACA":(17.0654,-96.7236),
-        "TUXTLA":(16.7500,-93.1167),"XALAPA":(19.5438,-96.9102),
-        "DURANGO":(24.0277,-104.6532),"TEPIC":(21.5044,-104.8953),
-        "COLIMA":(19.2433,-103.7278),"CAMPECHE":(19.8458,-90.5258),
-        "ZACATECAS":(22.7709,-102.5832),"GUANAJUATO":(21.0190,-101.2574),
-        "IRAPUATO":(20.6778,-101.3554),"CELAYA":(20.5232,-100.8149),
+        "CUERNAVACA":(18.9242,-99.2216),"TIJUANA":(32.5027,-117.0037),
+        "TIJUANAESTECENTRO":(32.5027,-117.0037),
     }
     def _extract_city(store_nm):
-        parts = str(store_nm).upper().replace("-","_").split("_")
-        return parts[-1].strip() if parts else ""
+        name = str(store_nm).upper().strip()
+        # normalize accents
+        name = ''.join(c for c in _ud.normalize('NFD', name) if _ud.category(c) != 'Mn')
+        name = name.replace("-","_")
+        name = _re_map.sub(r'^\d+_', '', name)
+        for pfx in ["NUM_TIENDA_","TIENDA_","NUM_","STORE_"]:
+            if name.startswith(pfx):
+                name = name[len(pfx):]
+                break
+        name = _re_map.sub(r'_\d+$', '', name)
+        return name.strip()
+    def _find_coords(city_key):
+        if city_key in CITY_COORDS:
+            return CITY_COORDS[city_key]
+        for k, v in CITY_COORDS.items():
+            if city_key in k or k in city_key:
+                return v
+        return None
     stores["ciudad"] = stores["store_nm"].apply(_extract_city)
-    stores["lat"] = stores["ciudad"].map(lambda c: CITY_COORDS.get(c, (None,None))[0])
-    stores["lon"] = stores["ciudad"].map(lambda c: CITY_COORDS.get(c, (None,None))[1])
+    def _get_lat(c): r = _find_coords(c); return r[0] if r else None
+    def _get_lon(c): r = _find_coords(c); return r[1] if r else None
+    stores["lat"] = stores["ciudad"].map(_get_lat)
+    stores["lon"] = stores["ciudad"].map(_get_lon)
     geo_df = stores.dropna(subset=["lat","lon"]).copy()
+    _unmatched = stores[stores["lat"].isna()]["store_nm"].tolist()
+    if _unmatched:
+        with st.expander(f"🔍 {len(_unmatched)} tienda(s) sin coordenadas — haz clic para ver", expanded=False):
+            st.write(_unmatched)
     if len(geo_df) > 0:
         geo_df["size_val"] = (geo_df["margen_pct"].clip(lower=0) + 1) * 8
         fig_map = px.scatter_mapbox(
@@ -1555,6 +1620,9 @@ with tab2:
         avg_margen = margen_ts["margen_pct"].mean()
         last_val   = margen_ts["margen_pct"].iloc[-1]
         last_mes   = margen_ts["mes_str"].iloc[-1]
+        first_mes  = margen_ts["mes_str"].iloc[0]
+        y_min      = float(margen_ts["margen_pct"].min())
+        y_max      = float(margen_ts["margen_pct"].max())
         fig_mg = go.Figure()
         fig_mg.add_trace(go.Scatter(
             x=margen_ts["mes_str"], y=margen_ts["margen_pct"],
@@ -1565,15 +1633,19 @@ with tab2:
             hovertemplate="<b>%{x}</b><br>Margen: %{y:.2f}%<extra></extra>"))
         fig_mg.add_hline(y=avg_margen, line_dash="dash", line_color="#555",
                          annotation_text=f"Promedio: {avg_margen:.1f}%",
-                         annotation_position="top left")
+                         annotation_position="top left",
+                         annotation=dict(xanchor="left", x=first_mes, yshift=10))
         fig_mg.add_annotation(x=last_mes, y=last_val,
                               text=f"{last_val:.1f}%", showarrow=True,
-                              arrowhead=2, font=dict(color=OM_RED, size=12))
-        fig_mg.update_layout(plot_bgcolor="white", paper_bgcolor="white",
-                             height=280, margin=dict(t=30,b=30,l=40,r=20),
-                             xaxis=dict(tickangle=45, title=""),
-                             yaxis=dict(title="Margen %", ticksuffix="%"),
-                             showlegend=False)
+                              arrowhead=2, font=dict(color=OM_RED, size=12),
+                              xanchor="right", yanchor="bottom", yshift=10)
+        fig_mg.update_layout(
+            plot_bgcolor="white", paper_bgcolor="white",
+            height=380, margin=dict(l=70, r=80, t=50, b=60),
+            xaxis=dict(dtick="M6", tickformat="%b %Y", tickangle=45, title=""),
+            yaxis=dict(title="Margen %", ticksuffix="%",
+                       range=[y_min * 0.97, y_max * 1.03]),
+            showlegend=False)
         st.plotly_chart(fig_mg, use_container_width=True)
 
     # Fix 5 — Marca: stat cards + grouped bar
@@ -1635,19 +1707,30 @@ with tab2:
             yaxis=dict(title="Venta promedio ($)"), showlegend=False)
         st.plotly_chart(fig_seas, use_container_width=True)
     with se2:
-        # Treemap dept share (Fix 8b-b)
-        dept_tree = agg["dept"].copy()
-        fig_tree = px.treemap(dept_tree, path=["dept_short"], values="venta",
-                              color="margen_pct_pond",
-                              color_continuous_scale=["#FFCDD2", OM_RED],
-                              title="Participación y margen por departamento",
-                              labels={"margen_pct_pond":"Margen %","venta":"Ventas ($)"})
-        fig_tree.update_traces(
-            hovertemplate="<b>%{label}</b><br>Ventas: $%{value:,.0f}<br>Margen: %{color:.1f}%<extra></extra>",
-            textinfo="label+percent entry")
-        fig_tree.update_layout(height=280, margin=dict(t=40,b=10,l=10,r=10),
-                               paper_bgcolor="white",
-                               coloraxis_colorbar=dict(title="Margen %"))
+        # Fix 6 — Treemap: discrete OfficeMax palette, white bg, margen as label text
+        dept_tree = agg["dept"].copy().sort_values("venta", ascending=False)
+        _om_palette = [OM_RED, "#FFD100", "#1A1A1A", "#888888",
+                       OM_BLUE, OM_GREEN, OM_AMBER, OM_LGRAY]
+        _dept_colors = {
+            row["dept_short"]: _om_palette[i % len(_om_palette)]
+            for i, (_, row) in enumerate(dept_tree.iterrows())
+        }
+        dept_tree["color_cat"] = dept_tree["dept_short"].map(_dept_colors)
+        dept_tree["margen_label"] = dept_tree["margen_pct_pond"].apply(
+            lambda v: f"{v:.1f}%" if pd.notna(v) else "—")
+        fig_tree = go.Figure(go.Treemap(
+            labels=dept_tree["dept_short"].tolist(),
+            parents=[""] * len(dept_tree),
+            values=dept_tree["venta"].tolist(),
+            customdata=dept_tree[["margen_label","dept_nm"]].values,
+            marker=dict(colors=dept_tree["color_cat"].tolist()),
+            texttemplate="<b>%{label}</b><br>%{percentParent:.0%}<br>Margen: %{customdata[0]}",
+            hovertemplate="<b>%{customdata[1]}</b><br>Ventas: $%{value:,.0f}<br>Margen: %{customdata[0]}<extra></extra>",
+            textfont=dict(color="white", size=13)))
+        fig_tree.update_layout(
+            title="Participación y margen por departamento",
+            height=280, margin=dict(t=40, b=0, l=0, r=0),
+            paper_bgcolor="white", plot_bgcolor="white")
         st.plotly_chart(fig_tree, use_container_width=True)
 
 
@@ -1968,63 +2051,76 @@ with tab3:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Fix 9 — SKU scatter: beta vs financial impact
+    # Fix 1/9 — SKU scatter wrapped in try/except; safe prod_nm fallback
     if len(df_sim) > 0:
-        _scatter_base = df_sim[df_sim["cambio"]=="Base 0%"][["prod_nm","ingreso_est"]].copy()
-        _scatter_best = df_sim[df_sim["cambio"].isin(["+10%","-10%"])].copy()
-        _scatter_best = _scatter_best.groupby("prod_nm").apply(
-            lambda g: g.loc[(g["ingreso_est"] - _scatter_base.set_index("prod_nm").reindex(g["prod_nm"])["ingreso_est"].values).abs().idxmax()]
-            if len(g) > 0 else g.iloc[0]).reset_index(drop=True) if len(_scatter_best) > 0 else pd.DataFrame()
-        _scat_df = df_m1a[["prod_nm","prod_nbr","beta","pval","recomendacion"]].copy()
-        _scat_base = df_sim[df_sim["cambio"]=="Base 0%"][["prod_nm","ingreso_est","precio_nuevo","unidades_est"]].copy()
-        _best_esc = df_sim.copy()
-        _best_esc["abs_delta"] = _best_esc["delta_ingreso_pct"].abs()
-        _best_per_sku = _best_esc.sort_values("abs_delta",ascending=False).drop_duplicates("prod_nm")
-        _scat_df = _scat_df.merge(_scat_base.rename(columns={"ingreso_est":"ingreso_base","precio_nuevo":"precio_actual","unidades_est":"uds_base"}), on="prod_nm", how="left")
-        _scat_df = _scat_df.merge(_best_per_sku[["prod_nm","cambio","delta_ingreso_pct"]].rename(columns={"cambio":"mejor_esc","delta_ingreso_pct":"impacto_pct"}), on="prod_nm", how="left")
-        _scat_df["impacto_mes"] = (_scat_df["ingreso_base"] * _scat_df["impacto_pct"].fillna(0) / 100).fillna(0)
-        _rec_colors_scatter = {
-            "Subir precio":     OM_RED,
-            "Mantener precio":  "#FFA500",
-            "Bajar / Promover": "#2196F3",
-            "No recomendable":  OM_LGRAY,
-        }
-        section("🎯 Priorización de productos: sensibilidad al precio vs impacto financiero")
-        st.caption("Los productos en la esquina inferior izquierda son muy sensibles al precio y de alto impacto — prioriza sus promociones.")
-        fig_scat = go.Figure()
-        for rec_s, grp_s in _scat_df.groupby("recomendacion"):
-            fig_scat.add_trace(go.Scatter(
-                x=grp_s["beta"], y=grp_s["impacto_mes"],
-                mode="markers", name=rec_s,
-                marker=dict(size=10, color=_rec_colors_scatter.get(rec_s, OM_LGRAY), opacity=0.8,
-                            line=dict(width=1, color="white")),
-                hovertemplate=(
-                    "<b>%{customdata[0]}</b><br>"
-                    "Índice sensibilidad (β): %{x:.3f}<br>"
-                    "Impacto estimado: $%{y:,.0f}/mes<br>"
-                    "p-valor: %{customdata[1]:.4f}<br>"
-                    "Recomendación: %{customdata[2]}<extra></extra>"),
-                customdata=grp_s[["prod_nm","pval","recomendacion"]].values))
-        fig_scat.add_vline(x=-1.0,  line_dash="dash", line_color="#888", opacity=0.7)
-        fig_scat.add_vline(x=-1.5,  line_dash="dot",  line_color="#888", opacity=0.6)
-        fig_scat.add_annotation(x=-0.5, y=_scat_df["impacto_mes"].max()*0.92,
-                                text="Inelástico<br>→ Sube precio", showarrow=False,
-                                font=dict(size=11, color="#555"), bgcolor="rgba(255,255,255,0.8)")
-        fig_scat.add_annotation(x=-1.25, y=_scat_df["impacto_mes"].max()*0.92,
-                                text="Unitario<br>→ Mantén", showarrow=False,
-                                font=dict(size=11, color="#555"), bgcolor="rgba(255,255,255,0.8)")
-        fig_scat.add_annotation(x=-2.2, y=_scat_df["impacto_mes"].max()*0.92,
-                                text="Elástico<br>→ Promociona", showarrow=False,
-                                font=dict(size=11, color="#555"), bgcolor="rgba(255,255,255,0.8)")
-        fig_scat.update_layout(
-            plot_bgcolor="white", paper_bgcolor="white",
-            height=380, margin=dict(t=30,b=40,l=50,r=20),
-            xaxis=dict(title="Índice de sensibilidad al precio (β)",
-                       gridcolor="#F0F0F0", zeroline=True, zerolinecolor="#CCC"),
-            yaxis=dict(title="Impacto financiero estimado ($/mes)",
-                       gridcolor="#F0F0F0", tickprefix="$"),
-            legend=dict(orientation="h", y=1.1))
-        st.plotly_chart(fig_scat, use_container_width=True)
+        try:
+            # Safe id column: prod_nm if available, else prod_nbr
+            _id_col = "prod_nm" if "prod_nm" in df_sim.columns else "prod_nbr"
+            _scat_base = df_sim[df_sim["cambio"]=="Base 0%"][[_id_col,"ingreso_est","precio_nuevo","unidades_est"]].copy()
+            _best_esc = df_sim.copy()
+            _best_esc["abs_delta"] = _best_esc["delta_ingreso_pct"].abs()
+            _best_per_sku = _best_esc.sort_values("abs_delta", ascending=False).drop_duplicates(_id_col)
+            _id_col_m1a = "prod_nm" if "prod_nm" in df_m1a.columns else "prod_nbr"
+            _scat_df = df_m1a[[_id_col_m1a,"prod_nbr","beta","pval","recomendacion"]].copy()
+            _scat_df = _scat_df.merge(
+                _scat_base.rename(columns={_id_col:"_join_key","ingreso_est":"ingreso_base",
+                                           "precio_nuevo":"precio_actual","unidades_est":"uds_base"}),
+                left_on=_id_col_m1a, right_on="_join_key", how="left")
+            _scat_df = _scat_df.merge(
+                _best_per_sku[[_id_col,"delta_ingreso_pct"]].rename(
+                    columns={_id_col:"_join_key2","delta_ingreso_pct":"impacto_pct"}),
+                left_on=_id_col_m1a, right_on="_join_key2", how="left")
+            _scat_df["impacto_mes"] = (_scat_df["ingreso_base"] * _scat_df["impacto_pct"].fillna(0) / 100).fillna(0)
+            _hover_label = _scat_df[_id_col_m1a].astype(str)
+            _rec_colors_scatter = {
+                "Subir precio":     OM_RED,
+                "Mantener precio":  "#FFA500",
+                "Bajar / Promover": "#2196F3",
+                "No recomendable":  OM_LGRAY,
+            }
+            section("🎯 Priorización de productos: sensibilidad al precio vs impacto financiero")
+            st.caption("Los productos en la esquina inferior izquierda son muy sensibles al precio y de alto impacto — prioriza sus promociones.")
+            fig_scat = go.Figure()
+            for rec_s, grp_s in _scat_df.groupby("recomendacion"):
+                _cd = np.column_stack([
+                    grp_s[_id_col_m1a].astype(str).values,
+                    grp_s["pval"].values,
+                    grp_s["recomendacion"].values])
+                fig_scat.add_trace(go.Scatter(
+                    x=grp_s["beta"], y=grp_s["impacto_mes"],
+                    mode="markers", name=rec_s,
+                    marker=dict(size=10, color=_rec_colors_scatter.get(rec_s, OM_LGRAY),
+                                opacity=0.8, line=dict(width=1, color="white")),
+                    hovertemplate=(
+                        "<b>%{customdata[0]}</b><br>"
+                        "Índice sensibilidad (β): %{x:.3f}<br>"
+                        "Impacto estimado: $%{y:,.0f}/mes<br>"
+                        "p-valor: %{customdata[1]}<br>"
+                        "Recomendación: %{customdata[2]}<extra></extra>"),
+                    customdata=_cd))
+            _y_max = _scat_df["impacto_mes"].max() if len(_scat_df) > 0 else 1
+            fig_scat.add_vline(x=-1.0, line_dash="dash", line_color="#888", opacity=0.7)
+            fig_scat.add_vline(x=-1.5, line_dash="dot",  line_color="#888", opacity=0.6)
+            fig_scat.add_annotation(x=-0.5,  y=_y_max*0.92, text="Inelástico<br>→ Sube precio",
+                                    showarrow=False, font=dict(size=11, color="#555"),
+                                    bgcolor="rgba(255,255,255,0.8)")
+            fig_scat.add_annotation(x=-1.25, y=_y_max*0.92, text="Unitario<br>→ Mantén",
+                                    showarrow=False, font=dict(size=11, color="#555"),
+                                    bgcolor="rgba(255,255,255,0.8)")
+            fig_scat.add_annotation(x=-2.2,  y=_y_max*0.92, text="Elástico<br>→ Promociona",
+                                    showarrow=False, font=dict(size=11, color="#555"),
+                                    bgcolor="rgba(255,255,255,0.8)")
+            fig_scat.update_layout(
+                plot_bgcolor="white", paper_bgcolor="white",
+                height=380, margin=dict(t=30,b=40,l=50,r=20),
+                xaxis=dict(title="Índice de sensibilidad al precio (β)",
+                           gridcolor="#F0F0F0", zeroline=True, zerolinecolor="#CCC"),
+                yaxis=dict(title="Impacto financiero estimado ($/mes)",
+                           gridcolor="#F0F0F0", tickprefix="$"),
+                legend=dict(orientation="h", y=1.1))
+            st.plotly_chart(fig_scat, use_container_width=True)
+        except Exception as _e_scat:
+            st.warning(f"⚠️ No se pudo generar el gráfico de dispersión: {str(_e_scat)}")
         st.markdown("<br>", unsafe_allow_html=True)
 
     # Mini gráfica de distribución de betas + donut lado a lado

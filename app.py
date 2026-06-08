@@ -801,173 +801,7 @@ def _fmt_bar(fig, values, prefix="$", suffix="", decimals=0):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SIDEBAR
-# ══════════════════════════════════════════════════════════════════════════════
-with st.sidebar:
-    # ── Logo ────────────────────────────────────────────────────────────────
-    try:
-        st.image("assets/logo-officemax-ball.png", width=220)
-    except Exception:
-        st.markdown("""
-        <div class="sidebar-logo-wrap">
-            <span style="font-size:26px;font-weight:900;color:#E31837;">OFFICEMAX</span><br>
-            <span style="font-size:9px;color:#aaa;letter-spacing:2px;">DYNAMIC PRICING ANALYZER</span>
-        </div>""", unsafe_allow_html=True)
 
-    st.markdown("<hr class='sidebar-divider'>", unsafe_allow_html=True)
-
-    # ── Sección 1: Carga de datos ────────────────────────────────────────────
-    st.markdown('<p class="sidebar-section-label">📦 Carga tus datos</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sidebar-hint">Tu ZIP debe contener 4 archivos: Ventas · Catálogo · Precios · Costos</p>',
-                unsafe_allow_html=True)
-    uploaded = st.file_uploader("Archivo ZIP con datos", type=["zip"], label_visibility="collapsed")
-
-    if uploaded:
-        is_new_file = st.session_state.get("loaded_file_name") != uploaded.name
-        if is_new_file:
-            raw_bytes = uploaded.read()
-            with st.spinner("Leyendo y limpiando datos..."):
-                try:
-                    df_main, report_df = load_and_clean(raw_bytes)
-                    st.session_state["df_main"]          = df_main
-                    st.session_state["clean_report"]     = report_df
-                    st.session_state["results"]          = None
-                    st.session_state["df_csv_bytes"]     = df_main.to_csv(index=False).encode("utf-8")
-                    st.session_state["loaded_file_name"] = uploaded.name
-                    _detail = report_df.iloc[-1]["Detalle"]
-                    st.markdown(f'<div class="sidebar-status-ok">✅ Listo — {_detail}</div>',
-                                unsafe_allow_html=True)
-                except Exception as e:
-                    st.markdown(f'<div class="sidebar-status-err">❌ Error: {e}</div>',
-                                unsafe_allow_html=True)
-        else:
-            _rpt = st.session_state.get("clean_report")
-            _det = _rpt.iloc[-1]["Detalle"] if _rpt is not None else "Datos en memoria"
-            st.markdown(f'<div class="sidebar-status-ok">✅ Listo — {_det}</div>', unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="sidebar-status-err">⬆️ Sube tu archivo ZIP para comenzar</div>',
-                    unsafe_allow_html=True)
-
-    st.markdown("<hr class='sidebar-divider'>", unsafe_allow_html=True)
-
-    # ── Sección 2: Promociones ───────────────────────────────────────────────
-    st.markdown('<p class="sidebar-section-label">🏷️ Promociones (opcional)</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sidebar-hint">Sube tu calendario de promos para ver cuáles realmente funcionaron</p>',
-                unsafe_allow_html=True)
-    uploaded_promo = st.file_uploader("Excel de promociones", type=["xlsx","xls"],
-                                       label_visibility="collapsed", key="promo_uploader")
-    if uploaded_promo:
-        if st.session_state.get("promo_file_name") != uploaded_promo.name:
-            st.session_state["promo_bytes"]     = uploaded_promo.read()
-            st.session_state["promo_file_name"] = uploaded_promo.name
-            st.session_state["ml_results"]      = None
-        st.markdown('<div class="sidebar-status-ok">✅ Promociones cargadas</div>', unsafe_allow_html=True)
-
-    st.markdown("<hr class='sidebar-divider'>", unsafe_allow_html=True)
-
-    # ── Sección 3: Configuración avanzada (colapsada) ────────────────────────
-    with st.expander("⚙️ Configuración avanzada", expanded=False):
-        st.caption("Los valores predeterminados funcionan bien para datos de OfficeMax. Cámbialos solo si salen muy pocos productos.")
-        min_obs = st.slider("Meses mínimos por producto", 3, 18, 6,
-            help="Mínimo de meses con datos para analizar un producto. Baja a 4-5 si salen muy pocos.")
-        min_r2 = st.slider("Precisión mínima del modelo (R²)", 0.0, 0.5, 0.0, 0.05,
-            help="En retail, 0.10-0.20 ya es aceptable. No uses 0.5+.")
-        max_beta = st.slider("Sensibilidad máxima al precio", 2.0, 15.0, 10.0, 0.5,
-            help="Elasticidades mayores a 5 suelen ser errores estadísticos.")
-        min_cv_pct = st.slider("Variación mínima de precio (%)", 0.0, 10.0, 1.0, 0.5,
-            help="Si el precio nunca cambió, no se puede estimar la sensibilidad. 1% es permisivo.")
-        min_cv = min_cv_pct / 100
-        pval_thresh = st.slider("Nivel de confianza estadística", 0.05, 0.25, 0.10, 0.05,
-            help="0.10 = 90% de confianza (estándar en análisis de negocio).")
-        run_rolling = st.checkbox(
-            "Calcular tendencia trimestral y semestral (~1-3 min extra)", value=False,
-            help="Activa para ver cómo cambia la sensibilidad al precio a lo largo del tiempo.")
-
-    st.markdown("<hr class='sidebar-divider'>", unsafe_allow_html=True)
-
-    # ── Sección 4: Configuración de correo ───────────────────────────────────
-    _default_email = os.environ.get("REPORT_EMAIL_FROM", "")
-    _default_pass  = os.environ.get("REPORT_EMAIL_PASS",  "")
-    with st.expander("📧 Configuración de correo", expanded=False):
-        st.caption("Para enviar reportes por correo. Usa una cuenta Gmail con contraseña de aplicación.")
-        _ef = st.text_input("Tu correo Gmail",
-                             value=st.session_state.get("email_from") or _default_email,
-                             placeholder="tucorreo@gmail.com", key="email_from_input")
-        _ep = st.text_input("Contraseña de aplicación Gmail", type="password",
-                             value=st.session_state.get("email_pass") or _default_pass,
-                             placeholder="xxxx xxxx xxxx xxxx", key="email_pass_input")
-        if _ef: st.session_state["email_from"] = _ef
-        if _ep: st.session_state["email_pass"] = _ep
-        st.caption("⚠️ Usa una contraseña de aplicación, no tu contraseña de Gmail. "
-                   "Créala en: Cuenta Google → Seguridad → Verificación en 2 pasos → Contraseñas de aplicación")
-
-    st.markdown("<hr class='sidebar-divider'>", unsafe_allow_html=True)
-
-    # ── Botón principal CTA ──────────────────────────────────────────────────
-    _datos_listos = st.session_state.get("df_csv_bytes") is not None
-    run_btn = st.button(
-        "🔍 Analizar mi catálogo",
-        type="primary",
-        use_container_width=True,
-        disabled=not _datos_listos,
-    )
-    if not _datos_listos:
-        st.markdown('<p class="sidebar-hint" style="text-align:center;">Sube primero tu archivo ZIP</p>',
-                    unsafe_allow_html=True)
-
-    if run_btn and _datos_listos:
-        csv_bytes = st.session_state["df_csv_bytes"]
-        with st.spinner("⚙️ Analizando tu catálogo… esto tarda unos 30 segundos"):
-            try:
-                res = run_models(df_csv=csv_bytes, min_obs=min_obs, min_cv=min_cv,
-                                 min_r2=min_r2, max_beta=max_beta, pval_thresh=pval_thresh,
-                                 run_rolling=run_rolling)
-                st.session_state["results"] = res
-            except Exception as e:
-                st.error(f"Error en el análisis: {e}")
-        with st.spinner("🌲 Entrenando modelos de predicción…"):
-            try:
-                promo_b = st.session_state.get("promo_bytes") or b""
-                ml_res = run_ml_pipeline(csv_bytes, promo_b)
-                st.session_state["ml_results"] = ml_res
-            except Exception as e:
-                st.warning(f"Análisis ML no completado: {e}")
-        st.success("✅ Listo — revisa las pestañas")
-        st.session_state["ai_analysis"] = None
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# LANDING
-# ══════════════════════════════════════════════════════════════════════════════
-df_main      = st.session_state["df_main"]
-clean_report = st.session_state["clean_report"]
-
-if df_main is None:
-    st.markdown("""
-    <div style="text-align:center; padding:60px 20px 40px 20px;">
-        <div style="font-size:60px;">📊</div>
-        <h1 style="font-weight:900; color:#1A1A1A; margin:12px 0 6px 0;">Dynamic Pricing Analyzer</h1>
-        <p style="font-size:17px; color:#666; max-width:580px; margin:0 auto 36px auto;">
-            Analiza la elasticidad precio de tus productos y obtén recomendaciones de pricing
-            basadas en datos reales de ventas OfficeMax.
-        </p>
-        <div style="background:#fff8f8; border:2px dashed #E31837; border-radius:16px;
-                    padding:36px; max-width:460px; margin:0 auto;">
-            <div style="font-size:44px;">📦</div>
-            <p style="font-weight:700; color:#E31837; font-size:18px; margin:10px 0 6px 0;">
-                Sube tu archivo ZIP en el panel izquierdo
-            </p>
-            <p style="color:#666; font-size:13px; margin:0;">
-                El ZIP debe contener: Ventas · Catálogo · Precios · Costos
-            </p>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.stop()
-
-# ══════════════════════════════════════════════════════════════════════════════
-# ML PIPELINE — RF vs Gradient Boosting + Promo Detection
-# ══════════════════════════════════════════════════════════════════════════════
 
 @st.cache_data(show_spinner=False)
 def run_ml_pipeline(df_csv: bytes, promo_bytes: bytes):
@@ -1226,6 +1060,176 @@ def run_ml_pipeline(df_csv: bytes, promo_bytes: bytes):
             "top_sens":top_sens,
             "dept_pivot":dept_pivot,"sku_mes":sku_mes,"promo_eval":promo_eval}
 
+
+
+
+# SIDEBAR
+# ══════════════════════════════════════════════════════════════════════════════
+with st.sidebar:
+    # ── Logo ────────────────────────────────────────────────────────────────
+    try:
+        st.image("assets/logo-officemax-ball.png", width=220)
+    except Exception:
+        st.markdown("""
+        <div class="sidebar-logo-wrap">
+            <span style="font-size:26px;font-weight:900;color:#E31837;">OFFICEMAX</span><br>
+            <span style="font-size:9px;color:#aaa;letter-spacing:2px;">DYNAMIC PRICING ANALYZER</span>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("<hr class='sidebar-divider'>", unsafe_allow_html=True)
+
+    # ── Sección 1: Carga de datos ────────────────────────────────────────────
+    st.markdown('<p class="sidebar-section-label">📦 Carga tus datos</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sidebar-hint">Tu ZIP debe contener 4 archivos: Ventas · Catálogo · Precios · Costos</p>',
+                unsafe_allow_html=True)
+    uploaded = st.file_uploader("Archivo ZIP con datos", type=["zip"], label_visibility="collapsed")
+
+    if uploaded:
+        is_new_file = st.session_state.get("loaded_file_name") != uploaded.name
+        if is_new_file:
+            raw_bytes = uploaded.read()
+            with st.spinner("Leyendo y limpiando datos..."):
+                try:
+                    df_main, report_df = load_and_clean(raw_bytes)
+                    st.session_state["df_main"]          = df_main
+                    st.session_state["clean_report"]     = report_df
+                    st.session_state["results"]          = None
+                    st.session_state["df_csv_bytes"]     = df_main.to_csv(index=False).encode("utf-8")
+                    st.session_state["loaded_file_name"] = uploaded.name
+                    _detail = report_df.iloc[-1]["Detalle"]
+                    st.markdown(f'<div class="sidebar-status-ok">✅ Listo — {_detail}</div>',
+                                unsafe_allow_html=True)
+                except Exception as e:
+                    st.markdown(f'<div class="sidebar-status-err">❌ Error: {e}</div>',
+                                unsafe_allow_html=True)
+        else:
+            _rpt = st.session_state.get("clean_report")
+            _det = _rpt.iloc[-1]["Detalle"] if _rpt is not None else "Datos en memoria"
+            st.markdown(f'<div class="sidebar-status-ok">✅ Listo — {_det}</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="sidebar-status-err">⬆️ Sube tu archivo ZIP para comenzar</div>',
+                    unsafe_allow_html=True)
+
+    st.markdown("<hr class='sidebar-divider'>", unsafe_allow_html=True)
+
+    # ── Sección 2: Promociones ───────────────────────────────────────────────
+    st.markdown('<p class="sidebar-section-label">🏷️ Promociones (opcional)</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sidebar-hint">Sube tu calendario de promos para ver cuáles realmente funcionaron</p>',
+                unsafe_allow_html=True)
+    uploaded_promo = st.file_uploader("Excel de promociones", type=["xlsx","xls"],
+                                       label_visibility="collapsed", key="promo_uploader")
+    if uploaded_promo:
+        if st.session_state.get("promo_file_name") != uploaded_promo.name:
+            st.session_state["promo_bytes"]     = uploaded_promo.read()
+            st.session_state["promo_file_name"] = uploaded_promo.name
+            st.session_state["ml_results"]      = None
+        st.markdown('<div class="sidebar-status-ok">✅ Promociones cargadas</div>', unsafe_allow_html=True)
+
+    st.markdown("<hr class='sidebar-divider'>", unsafe_allow_html=True)
+
+    # ── Sección 3: Configuración avanzada (colapsada) ────────────────────────
+    with st.expander("⚙️ Configuración avanzada", expanded=False):
+        st.caption("Los valores predeterminados funcionan bien para datos de OfficeMax. Cámbialos solo si salen muy pocos productos.")
+        min_obs = st.slider("Meses mínimos por producto", 3, 18, 6,
+            help="Mínimo de meses con datos para analizar un producto. Baja a 4-5 si salen muy pocos.")
+        min_r2 = st.slider("Precisión mínima del modelo (R²)", 0.0, 0.5, 0.0, 0.05,
+            help="En retail, 0.10-0.20 ya es aceptable. No uses 0.5+.")
+        max_beta = st.slider("Sensibilidad máxima al precio", 2.0, 15.0, 10.0, 0.5,
+            help="Elasticidades mayores a 5 suelen ser errores estadísticos.")
+        min_cv_pct = st.slider("Variación mínima de precio (%)", 0.0, 10.0, 1.0, 0.5,
+            help="Si el precio nunca cambió, no se puede estimar la sensibilidad. 1% es permisivo.")
+        min_cv = min_cv_pct / 100
+        pval_thresh = st.slider("Nivel de confianza estadística", 0.05, 0.25, 0.10, 0.05,
+            help="0.10 = 90% de confianza (estándar en análisis de negocio).")
+        run_rolling = st.checkbox(
+            "Calcular tendencia trimestral y semestral (~1-3 min extra)", value=False,
+            help="Activa para ver cómo cambia la sensibilidad al precio a lo largo del tiempo.")
+
+    st.markdown("<hr class='sidebar-divider'>", unsafe_allow_html=True)
+
+    # ── Sección 4: Configuración de correo ───────────────────────────────────
+    _default_email = os.environ.get("REPORT_EMAIL_FROM", "")
+    _default_pass  = os.environ.get("REPORT_EMAIL_PASS",  "")
+    with st.expander("📧 Configuración de correo", expanded=False):
+        st.caption("Para enviar reportes por correo. Usa una cuenta Gmail con contraseña de aplicación.")
+        _ef = st.text_input("Tu correo Gmail",
+                             value=st.session_state.get("email_from") or _default_email,
+                             placeholder="tucorreo@gmail.com", key="email_from_input")
+        _ep = st.text_input("Contraseña de aplicación Gmail", type="password",
+                             value=st.session_state.get("email_pass") or _default_pass,
+                             placeholder="xxxx xxxx xxxx xxxx", key="email_pass_input")
+        if _ef: st.session_state["email_from"] = _ef
+        if _ep: st.session_state["email_pass"] = _ep
+        st.caption("⚠️ Usa una contraseña de aplicación, no tu contraseña de Gmail. "
+                   "Créala en: Cuenta Google → Seguridad → Verificación en 2 pasos → Contraseñas de aplicación")
+
+    st.markdown("<hr class='sidebar-divider'>", unsafe_allow_html=True)
+
+    # ── Botón principal CTA ──────────────────────────────────────────────────
+    _datos_listos = st.session_state.get("df_csv_bytes") is not None
+    run_btn = st.button(
+        "🔍 Analizar mi catálogo",
+        type="primary",
+        use_container_width=True,
+        disabled=not _datos_listos,
+    )
+    if not _datos_listos:
+        st.markdown('<p class="sidebar-hint" style="text-align:center;">Sube primero tu archivo ZIP</p>',
+                    unsafe_allow_html=True)
+
+    if run_btn and _datos_listos:
+        csv_bytes = st.session_state["df_csv_bytes"]
+        with st.spinner("⚙️ Analizando tu catálogo… esto tarda unos 30 segundos"):
+            try:
+                res = run_models(df_csv=csv_bytes, min_obs=min_obs, min_cv=min_cv,
+                                 min_r2=min_r2, max_beta=max_beta, pval_thresh=pval_thresh,
+                                 run_rolling=run_rolling)
+                st.session_state["results"] = res
+            except Exception as e:
+                st.error(f"Error en el análisis: {e}")
+        with st.spinner("🌲 Entrenando modelos de predicción…"):
+            try:
+                promo_b = st.session_state.get("promo_bytes") or b""
+                ml_res = run_ml_pipeline(csv_bytes, promo_b)
+                st.session_state["ml_results"] = ml_res
+            except Exception as e:
+                st.warning(f"Análisis ML no completado: {e}")
+        st.success("✅ Listo — revisa las pestañas")
+        st.session_state["ai_analysis"] = None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LANDING
+# ══════════════════════════════════════════════════════════════════════════════
+df_main      = st.session_state["df_main"]
+clean_report = st.session_state["clean_report"]
+
+if df_main is None:
+    st.markdown("""
+    <div style="text-align:center; padding:60px 20px 40px 20px;">
+        <div style="font-size:60px;">📊</div>
+        <h1 style="font-weight:900; color:#1A1A1A; margin:12px 0 6px 0;">Dynamic Pricing Analyzer</h1>
+        <p style="font-size:17px; color:#666; max-width:580px; margin:0 auto 36px auto;">
+            Analiza la elasticidad precio de tus productos y obtén recomendaciones de pricing
+            basadas en datos reales de ventas OfficeMax.
+        </p>
+        <div style="background:#fff8f8; border:2px dashed #E31837; border-radius:16px;
+                    padding:36px; max-width:460px; margin:0 auto;">
+            <div style="font-size:44px;">📦</div>
+            <p style="font-weight:700; color:#E31837; font-size:18px; margin:10px 0 6px 0;">
+                Sube tu archivo ZIP en el panel izquierdo
+            </p>
+            <p style="color:#666; font-size:13px; margin:0;">
+                El ZIP debe contener: Ventas · Catálogo · Precios · Costos
+            </p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.stop()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ML PIPELINE — RF vs Gradient Boosting + Promo Detection
+# ══════════════════════════════════════════════════════════════════════════════
 
 tab1, tab2, tab3 = st.tabs(["💡  Recomendaciones","📊  Resumen de Ventas","🎯  Inteligencia de Precios"])
 

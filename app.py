@@ -104,6 +104,53 @@ html, body, [class*="css"] { font-family: 'Roboto', Arial, sans-serif !important
     border-radius:12px; font-size:11px; font-weight:700; }
 .insight-box { background:#FFF8E1; border-left:4px solid #FFD100; border-radius:0 8px 8px 0;
     padding:8px 14px; font-size:13px; color:#333; margin:6px 0 16px 0; }
+/* ── Uploader AFTER file is loaded: keep dark background ── */
+[data-testid="stFileUploaderDropzone"],
+[data-testid="stFileUploader"] > div,
+[data-testid="stFileUploader"] > section {
+    background-color: #2C2C2C !important;
+    border: 2px dashed #E31837 !important;
+    border-radius: 10px !important;
+}
+[data-testid="stFileUploaderFile"],
+[data-testid="stFileUploaderFileName"] {
+    background-color: #3A3A3A !important;
+    border: 1px solid #555 !important;
+    border-radius: 6px !important;
+    color: #FFFFFF !important;
+}
+[data-testid="stFileUploaderFile"] *,
+[data-testid="stFileUploaderFileName"] * {
+    color: #FFFFFF !important;
+    fill: #FFFFFF !important;
+}
+[data-testid="stFileUploaderDeleteBtn"] button,
+[data-testid="stFileUploaderFile"] button {
+    background-color: #E31837 !important;
+    color: #FFFFFF !important;
+    border-radius: 50% !important;
+    border: none !important;
+}
+[data-testid="stFileUploader"] svg,
+[data-testid="stFileUploaderFile"] svg {
+    fill: #FFFFFF !important;
+    color: #FFFFFF !important;
+}
+[data-testid="stFileUploaderDropzone"] button,
+[data-testid="stFileUploader"] button[kind="secondary"] {
+    background-color: #E31837 !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    border-radius: 6px !important;
+}
+[data-testid="stFileUploader"] small,
+[data-testid="stFileUploader"] span { color: #CCCCCC !important; }
+section[data-testid="stSidebar"] [data-testid="stFileUploader"] {
+    background-color: #2C2C2C !important;
+}
+section[data-testid="stSidebar"] [data-testid="stFileUploader"] > div {
+    background-color: #2C2C2C !important;
+}
 /* Fix B — file uploader: force dark background on all inner elements */
 [data-testid="stFileUploaderDropzone"] {
     background-color: #2C2C2C !important;

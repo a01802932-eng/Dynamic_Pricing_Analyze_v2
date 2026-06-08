@@ -196,6 +196,10 @@ for _k in ["df_main", "clean_report", "results", "df_csv_bytes", "loaded_file_na
            "ai_analysis", "ml_results", "promo_bytes", "promo_file_name"]:
     if _k not in st.session_state:
         st.session_state[_k] = None
+if "show_email_form"   not in st.session_state: st.session_state["show_email_form"]   = False
+if "pdf_bytes_to_send" not in st.session_state: st.session_state["pdf_bytes_to_send"] = None
+if "email_from"        not in st.session_state: st.session_state["email_from"]        = ""
+if "email_pass"        not in st.session_state: st.session_state["email_pass"]        = ""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -542,6 +546,210 @@ def generate_narrative(df_m1a, m2, df_cal):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# PDF REPORT GENERATOR
+# ══════════════════════════════════════════════════════════════════════════════
+
+def generate_pdf_report(results, ml_results, ai_analysis, df_main) -> bytes:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
+                                     Table, TableStyle, HRFlowable)
+    from reportlab.lib.units import inch
+    from datetime import datetime as _dt
+
+    OM_RED_RL  = colors.HexColor("#E31837")
+    OM_GRAY_RL = colors.HexColor("#666666")
+    OM_LGRAY   = colors.HexColor("#F5F5F5")
+    OM_DARK    = colors.HexColor("#1A1A1A")
+    GREEN_RL   = colors.HexColor("#2E7D32")
+    BLUE_RL    = colors.HexColor("#1565C0")
+    MGRAY_RL   = colors.HexColor("#757575")
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=letter,
+                            leftMargin=0.75*inch, rightMargin=0.75*inch,
+                            topMargin=0.75*inch, bottomMargin=0.75*inch)
+    styles = getSampleStyleSheet()
+    story  = []
+
+    # ── Custom styles ──────────────────────────────────────────────────────────
+    title_style = ParagraphStyle("OmTitle", parent=styles["Heading1"],
+                                  textColor=OM_RED_RL, fontSize=22, spaceAfter=4)
+    sub_style   = ParagraphStyle("OmSub", parent=styles["Normal"],
+                                  textColor=OM_GRAY_RL, fontSize=11, spaceAfter=2)
+    date_style  = ParagraphStyle("OmDate", parent=styles["Normal"],
+                                  textColor=OM_GRAY_RL, fontSize=9, spaceAfter=12)
+    sec_style   = ParagraphStyle("OmSec", parent=styles["Heading2"],
+                                  textColor=OM_DARK, fontSize=13, spaceBefore=14, spaceAfter=6)
+    body_style  = ParagraphStyle("OmBody", parent=styles["Normal"],
+                                  fontSize=9, leading=13, spaceAfter=4)
+    foot_style  = ParagraphStyle("OmFoot", parent=styles["Normal"],
+                                  textColor=OM_GRAY_RL, fontSize=8, alignment=1)
+
+    # ── Page 1: Header ─────────────────────────────────────────────────────────
+    story.append(Paragraph("Dynamic Pricing Analyzer", title_style))
+    story.append(Paragraph("Reporte Ejecutivo de Optimización de Precios", sub_style))
+    story.append(Paragraph(
+        f"Generado el {_dt.now().strftime('%d de %B de %Y')}", date_style))
+    story.append(HRFlowable(width="100%", thickness=2, color=OM_RED_RL, spaceAfter=12))
+
+    # ── Executive summary ──────────────────────────────────────────────────────
+    story.append(Paragraph("Resumen Ejecutivo", sec_style))
+    summary_text = (ai_analysis or "Resumen no disponible — ejecuta el análisis primero.")
+    for line in summary_text.split("\n"):
+        clean = line.strip().replace("**","").replace("*","")
+        if clean:
+            story.append(Paragraph(clean, body_style))
+    story.append(Spacer(1, 0.15*inch))
+
+    # ── KPI summary table ──────────────────────────────────────────────────────
+    story.append(Paragraph("Indicadores Clave", sec_style))
+    df_m1a = results.get("m1a", pd.DataFrame())
+    df_sim = results.get("sim", pd.DataFrame())
+    rec_counts = df_m1a["recomendacion"].value_counts() if len(df_m1a) else {}
+    n_subir = int(rec_counts.get("Subir precio", 0))
+    n_prom  = int(rec_counts.get("Bajar / Promover", 0))
+    n_mant  = int(rec_counts.get("Mantener precio", 0))
+    # financial impact
+    def _pdf_delta(recs, esc):
+        if len(df_sim) == 0: return 0
+        ns = df_m1a[df_m1a["recomendacion"].isin(recs)]["prod_nm"].tolist() if "prod_nm" in df_m1a.columns else []
+        b = df_sim[(df_sim["prod_nm"].isin(ns)) & (df_sim["cambio"]=="Base 0%")]["ingreso_est"].sum() if ns else 0
+        t = df_sim[(df_sim["prod_nm"].isin(ns)) & (df_sim["cambio"]==esc)]["ingreso_est"].sum() if ns else 0
+        return t - b
+    imp_mes = _pdf_delta(["Subir precio"], "+10%") + _pdf_delta(["Bajar / Promover"], "-10%")
+    kpi_data = [
+        ["Indicador", "Valor"],
+        ["SKUs analizados",          f"{len(df_m1a):,}"],
+        ["Subir precio",             f"{n_subir:,} productos"],
+        ["Lanzar promoción",         f"{n_prom:,} productos"],
+        ["Mantener precio",          f"{n_mant:,} productos"],
+        ["Impacto mensual estimado", f"${imp_mes:,.0f} MXN/mes"],
+        ["Impacto anualizado",       f"${imp_mes*12:,.0f} MXN/año"],
+    ]
+    kpi_table = Table(kpi_data, colWidths=[3.2*inch, 2.5*inch])
+    kpi_ts = TableStyle([
+        ("BACKGROUND",   (0,0), (-1,0),  OM_RED_RL),
+        ("TEXTCOLOR",    (0,0), (-1,0),  colors.white),
+        ("FONTNAME",     (0,0), (-1,0),  "Helvetica-Bold"),
+        ("FONTSIZE",     (0,0), (-1,-1), 9),
+        ("ROWBACKGROUNDS",(0,1),(-1,-1), [colors.white, OM_LGRAY]),
+        ("GRID",         (0,0), (-1,-1), 0.3, colors.HexColor("#DDDDDD")),
+        ("LEFTPADDING",  (0,0), (-1,-1), 8),
+        ("RIGHTPADDING", (0,0), (-1,-1), 8),
+        ("TOPPADDING",   (0,0), (-1,-1), 5),
+        ("BOTTOMPADDING",(0,0), (-1,-1), 5),
+    ])
+    kpi_table.setStyle(kpi_ts)
+    story.append(kpi_table)
+    story.append(Spacer(1, 0.2*inch))
+
+    # ── Page 2: Top 20 recommendations ────────────────────────────────────────
+    story.append(Paragraph("Top 20 Recomendaciones", sec_style))
+    story.append(Paragraph(
+        "Productos con mayor impacto financiero potencial", body_style))
+
+    if len(df_m1a) > 0 and len(df_sim) > 0:
+        _id = "prod_nm" if "prod_nm" in df_sim.columns else "prod_nbr"
+        base_map = df_sim[df_sim["cambio"]=="Base 0%"].set_index(_id)["ingreso_est"].to_dict()
+        best_map = {}
+        for nm, grp in df_sim[df_sim["cambio"].isin(["+10%","-10%"])].groupby(_id):
+            b = base_map.get(nm, 0)
+            best_map[nm] = grp.loc[(grp["ingreso_est"] - b).abs().idxmax(), "ingreso_est"] - b
+        _id_m = "prod_nm" if "prod_nm" in df_m1a.columns else "prod_nbr"
+        top_df = df_m1a[df_m1a["recomendacion"] != "No recomendable"].copy()
+        top_df["_imp"] = top_df[_id_m].map(best_map).fillna(0).abs()
+        top_df = top_df.sort_values("_imp", ascending=False).head(20)
+
+        rec_header = ["Producto", "Departamento", "Recomendación", "Beta (β)", "Impacto $/mes"]
+        rec_rows   = [rec_header]
+        rec_colors_map = {
+            "Subir precio":     GREEN_RL,
+            "Bajar / Promover": BLUE_RL,
+            "Mantener precio":  MGRAY_RL,
+        }
+        color_cmds = []
+        for row_i, (_, r) in enumerate(top_df.iterrows(), start=1):
+            nm_col   = "prod_nm" if "prod_nm" in r.index else "prod_nbr"
+            dept_col = "dept_nm" if "dept_nm" in r.index else ""
+            rec_rows.append([
+                str(r.get(nm_col, ""))[:35],
+                str(r.get(dept_col, ""))[:20] if dept_col else "—",
+                str(r.get("recomendacion", "")),
+                f"{r.get('beta', 0):.3f}",
+                f"${best_map.get(r.get(nm_col,''), 0):,.0f}",
+            ])
+            c = rec_colors_map.get(str(r.get("recomendacion","")), MGRAY_RL)
+            color_cmds.append(("TEXTCOLOR", (2, row_i), (2, row_i), c))
+
+        rec_widths = [2.5*inch, 1.4*inch, 1.3*inch, 0.7*inch, 0.9*inch]
+        rec_table  = Table(rec_rows, colWidths=rec_widths)
+        rec_ts_cmds = [
+            ("BACKGROUND",    (0,0),  (-1,0),  OM_RED_RL),
+            ("TEXTCOLOR",     (0,0),  (-1,0),  colors.white),
+            ("FONTNAME",      (0,0),  (-1,0),  "Helvetica-Bold"),
+            ("FONTSIZE",      (0,0),  (-1,-1), 8),
+            ("ROWBACKGROUNDS",(0,1),  (-1,-1), [colors.white, OM_LGRAY]),
+            ("GRID",          (0,0),  (-1,-1), 0.3, colors.HexColor("#DDDDDD")),
+            ("LEFTPADDING",   (0,0),  (-1,-1), 5),
+            ("RIGHTPADDING",  (0,0),  (-1,-1), 5),
+            ("TOPPADDING",    (0,0),  (-1,-1), 3),
+            ("BOTTOMPADDING", (0,0),  (-1,-1), 3),
+        ] + color_cmds
+        rec_table.setStyle(TableStyle(rec_ts_cmds))
+        story.append(rec_table)
+    else:
+        story.append(Paragraph("No hay recomendaciones disponibles.", body_style))
+
+    story.append(Spacer(1, 0.3*inch))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=OM_GRAY_RL))
+    story.append(Spacer(1, 0.1*inch))
+    story.append(Paragraph("Generado automáticamente por Dynamic Pricing Analyzer v3", foot_style))
+    story.append(Paragraph("OfficeMax México — Análisis confidencial", foot_style))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf.read()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EMAIL SENDER
+# ══════════════════════════════════════════════════════════════════════════════
+
+def send_report_email(pdf_bytes: bytes, recipients: list, subject: str,
+                      body: str, from_email: str, app_password: str) -> tuple:
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.base import MIMEBase
+    from email.mime.text import MIMEText
+    from email import encoders
+    from datetime import datetime as _dt
+    try:
+        msg = MIMEMultipart()
+        msg["From"]    = from_email
+        msg["To"]      = ", ".join(recipients)
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+        part = MIMEBase("application", "octet-stream")
+        part.set_payload(pdf_bytes)
+        encoders.encode_base64(part)
+        fname = f"reporte_pricing_officemax_{_dt.now().strftime('%Y%m%d')}.pdf"
+        part.add_header("Content-Disposition", f"attachment; filename={fname}")
+        msg.attach(part)
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(from_email, app_password)
+            server.sendmail(from_email, recipients, msg.as_string())
+        return True, f"✅ Reporte enviado a: {', '.join(recipients)}"
+    except smtplib.SMTPAuthenticationError:
+        return False, "❌ Error de autenticación. Verifica tu correo y contraseña de aplicación."
+    except smtplib.SMTPException as e:
+        return False, f"❌ Error al enviar: {str(e)}"
+    except Exception as e:
+        return False, f"❌ Error inesperado: {str(e)}"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # UI HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -674,6 +882,24 @@ with st.sidebar:
         run_rolling = st.checkbox(
             "Calcular tendencia trimestral y semestral (~1-3 min extra)", value=False,
             help="Activa para ver cómo cambia la sensibilidad al precio a lo largo del tiempo.")
+
+    st.markdown("<hr class='sidebar-divider'>", unsafe_allow_html=True)
+
+    # ── Sección 4: Configuración de correo ───────────────────────────────────
+    _default_email = os.environ.get("REPORT_EMAIL_FROM", "")
+    _default_pass  = os.environ.get("REPORT_EMAIL_PASS",  "")
+    with st.expander("📧 Configuración de correo", expanded=False):
+        st.caption("Para enviar reportes por correo. Usa una cuenta Gmail con contraseña de aplicación.")
+        _ef = st.text_input("Tu correo Gmail",
+                             value=st.session_state.get("email_from") or _default_email,
+                             placeholder="tucorreo@gmail.com", key="email_from_input")
+        _ep = st.text_input("Contraseña de aplicación Gmail", type="password",
+                             value=st.session_state.get("email_pass") or _default_pass,
+                             placeholder="xxxx xxxx xxxx xxxx", key="email_pass_input")
+        if _ef: st.session_state["email_from"] = _ef
+        if _ep: st.session_state["email_pass"] = _ep
+        st.caption("⚠️ Usa una contraseña de aplicación, no tu contraseña de Gmail. "
+                   "Créala en: Cuenta Google → Seguridad → Verificación en 2 pasos → Contraseñas de aplicación")
 
     st.markdown("<hr class='sidebar-divider'>", unsafe_allow_html=True)
 
@@ -1954,6 +2180,80 @@ with tab3:
                 'REPORTE EJECUTIVO — CLAUDE (Anthropic)</div></div>',
                 unsafe_allow_html=True)
             st.markdown(st.session_state["ai_analysis"])
+
+    # ── PDF download + email buttons ──────────────────────────────────────────
+    from datetime import datetime as _dt_pdf
+    if st.session_state.get("results") and st.session_state.get("ml_results"):
+        try:
+            _pdf_bytes = generate_pdf_report(
+                st.session_state["results"],
+                st.session_state["ml_results"],
+                st.session_state.get("ai_analysis", ""),
+                st.session_state["df_main"])
+            _col_dl, _col_mail, _ = st.columns([1, 1, 2])
+            with _col_dl:
+                st.download_button(
+                    label="📄 Descargar reporte PDF",
+                    data=_pdf_bytes,
+                    file_name=f"reporte_pricing_officemax_{_dt_pdf.now().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True)
+            with _col_mail:
+                if st.button("📧 Enviar por correo", use_container_width=True, key="open_email_form"):
+                    st.session_state["pdf_bytes_to_send"] = _pdf_bytes
+                    st.session_state["show_email_form"]   = True
+        except Exception as _epdf:
+            st.warning(f"⚠️ No se pudo generar el PDF: {str(_epdf)}")
+
+    # ── Email form ────────────────────────────────────────────────────────────
+    if st.session_state.get("show_email_form") and st.session_state.get("pdf_bytes_to_send"):
+        st.markdown("---")
+        st.subheader("📧 Enviar reporte por correo")
+        _recip_input = st.text_area(
+            "Destinatarios (uno por línea o separados por coma)",
+            placeholder="gerente@officemax.com\ndirector@officemax.com",
+            height=100, key="recipients_input")
+        _subj = st.text_input(
+            "Asunto",
+            value=f"Reporte de Optimización de Precios — {_dt_pdf.now().strftime('%B %Y')}",
+            key="email_subject_input")
+        _body = st.text_area(
+            "Mensaje (el PDF irá adjunto)",
+            value=("Estimado/a,\n\n"
+                   "Adjunto encontrará el reporte ejecutivo de optimización de precios "
+                   "generado por el Dynamic Pricing Analyzer de OfficeMax México.\n\n"
+                   "El reporte incluye:\n"
+                   "• Resumen ejecutivo con hallazgos clave\n"
+                   "• Indicadores principales del análisis\n"
+                   "• Top 20 recomendaciones de precio por producto\n\n"
+                   "Saludos,\nEquipo de Pricing OfficeMax México"),
+            height=180, key="email_body_input")
+        _cs, _cc = st.columns(2)
+        with _cs:
+            if st.button("📤 Enviar ahora", type="primary", use_container_width=True, key="send_email_btn"):
+                _from  = st.session_state.get("email_from", "")
+                _pword = st.session_state.get("email_pass", "")
+                if not _from or not _pword:
+                    st.error("⚠️ Configura tu correo y contraseña en el panel izquierdo (📧 Configuración de correo)")
+                elif not _recip_input.strip():
+                    st.error("⚠️ Ingresa al menos un destinatario")
+                else:
+                    _recips = [r.strip() for r in _recip_input.replace(",","\n").splitlines() if r.strip()]
+                    with st.spinner("Enviando reporte..."):
+                        _ok, _msg = send_report_email(
+                            st.session_state["pdf_bytes_to_send"],
+                            _recips, _subj, _body, _from, _pword)
+                    if _ok:
+                        st.success(_msg)
+                        st.session_state["show_email_form"]   = False
+                        st.session_state["pdf_bytes_to_send"] = None
+                    else:
+                        st.error(_msg)
+        with _cc:
+            if st.button("Cancelar", use_container_width=True, key="cancel_email_btn"):
+                st.session_state["show_email_form"]   = False
+                st.session_state["pdf_bytes_to_send"] = None
+                st.rerun()
 
     st.markdown("<br>", unsafe_allow_html=True)
 

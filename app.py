@@ -104,79 +104,35 @@ html, body, [class*="css"] { font-family: 'Roboto', Arial, sans-serif !important
     border-radius:12px; font-size:11px; font-weight:700; }
 .insight-box { background:#FFF8E1; border-left:4px solid #FFD100; border-radius:0 8px 8px 0;
     padding:8px 14px; font-size:13px; color:#333; margin:6px 0 16px 0; }
-/* ── Uploader AFTER file is loaded: keep dark background ── */
-[data-testid="stFileUploaderDropzone"],
-[data-testid="stFileUploader"] > div,
-[data-testid="stFileUploader"] > section {
+/* Nuclear uploader dark override */
+div[data-testid="stFileUploaderDropzone"] {
     background-color: #2C2C2C !important;
     border: 2px dashed #E31837 !important;
     border-radius: 10px !important;
 }
-[data-testid="stFileUploaderFile"],
-[data-testid="stFileUploaderFileName"] {
+div[data-testid="stFileUploaderDropzone"] * { color: #FFFFFF !important; }
+div[data-testid="stFileUploaderDropzone"] svg { fill: #FFFFFF !important; }
+div[data-testid="stFileUploaderDropzone"] button {
+    background-color: #E31837 !important;
+    color: #FFFFFF !important;
+    border: none !important;
+}
+div[data-testid="stFileUploaderDropzone"] > div { background-color: #2C2C2C !important; }
+div[data-testid="stFileUploaderDropzone"] > div > div { background-color: #2C2C2C !important; }
+div[data-testid="stFileUploaderFile"] {
     background-color: #3A3A3A !important;
     border: 1px solid #555 !important;
     border-radius: 6px !important;
-    color: #FFFFFF !important;
 }
-[data-testid="stFileUploaderFile"] *,
-[data-testid="stFileUploaderFileName"] * {
+div[data-testid="stFileUploaderFile"] * {
     color: #FFFFFF !important;
     fill: #FFFFFF !important;
 }
-[data-testid="stFileUploaderDeleteBtn"] button,
-[data-testid="stFileUploaderFile"] button {
+div[data-testid="stFileUploaderFile"] button {
     background-color: #E31837 !important;
     color: #FFFFFF !important;
     border-radius: 50% !important;
-    border: none !important;
 }
-[data-testid="stFileUploader"] svg,
-[data-testid="stFileUploaderFile"] svg {
-    fill: #FFFFFF !important;
-    color: #FFFFFF !important;
-}
-[data-testid="stFileUploaderDropzone"] button,
-[data-testid="stFileUploader"] button[kind="secondary"] {
-    background-color: #E31837 !important;
-    color: #FFFFFF !important;
-    border: none !important;
-    border-radius: 6px !important;
-}
-[data-testid="stFileUploader"] small,
-[data-testid="stFileUploader"] span { color: #CCCCCC !important; }
-section[data-testid="stSidebar"] [data-testid="stFileUploader"] {
-    background-color: #2C2C2C !important;
-}
-section[data-testid="stSidebar"] [data-testid="stFileUploader"] > div {
-    background-color: #2C2C2C !important;
-}
-/* Fix B — file uploader: force dark background on all inner elements */
-[data-testid="stFileUploaderDropzone"] {
-    background-color: #2C2C2C !important;
-    border: 2px dashed #E31837 !important;
-    border-radius: 10px !important;
-}
-[data-testid="stFileUploaderDropzone"] * {
-    color: #FFFFFF !important;
-    fill: #FFFFFF !important;
-}
-[data-testid="stFileUploaderDropzone"] small,
-[data-testid="stFileUploaderDropzone"] span,
-[data-testid="stFileUploaderDropzone"] p { color: #CCCCCC !important; }
-[data-testid="stFileUploaderDropzone"] svg path { fill: #FFFFFF !important; }
-[data-testid="stFileUploaderDropzone"] button {
-    background-color: #E31837 !important;
-    color: #FFFFFF !important;
-    border: none !important;
-    border-radius: 6px !important;
-}
-[data-testid="stFileUploaderFile"] {
-    background-color: #333333 !important;
-    border: 1px solid #555555 !important;
-    border-radius: 6px !important;
-}
-[data-testid="stFileUploaderFile"] * { color: #FFFFFF !important; }
 /* Fix B — expander dark background */
 [data-testid="stExpander"] > div:first-child {
     background-color: #2C2C2C !important;
@@ -199,6 +155,38 @@ section[data-testid="stSidebar"] span,
 section[data-testid="stSidebar"] div,
 section[data-testid="stSidebar"] small { color: #FFFFFF !important; }
 </style>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<script>
+(function patchUploaders() {
+    function applyDark() {
+        var selectors = [
+            '[data-testid="stFileUploaderDropzone"]',
+            '[data-testid="stFileUploaderDropzone"] > div',
+            '[data-testid="stFileUploaderDropzone"] > div > div',
+            '[data-testid="stFileUploaderDropzone"] > div > div > div'
+        ];
+        selectors.forEach(function(sel) {
+            document.querySelectorAll(sel).forEach(function(el) {
+                el.style.setProperty('background-color', '#2C2C2C', 'important');
+                el.style.setProperty('color', '#FFFFFF', 'important');
+            });
+        });
+        document.querySelectorAll('[data-testid="stFileUploaderDropzone"] svg path')
+            .forEach(function(el) { el.style.setProperty('fill', '#FFFFFF', 'important'); });
+        document.querySelectorAll('[data-testid="stFileUploaderFile"], [class*="uploadedFile"]')
+            .forEach(function(el) {
+                el.style.setProperty('background-color', '#3A3A3A', 'important');
+                el.style.setProperty('color', '#FFFFFF', 'important');
+            });
+    }
+    applyDark();
+    var observer = new MutationObserver(function() { applyDark(); });
+    observer.observe(document.body, { childList: true, subtree: true });
+    setInterval(applyDark, 800);
+})();
+</script>
 """, unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════

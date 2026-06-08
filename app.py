@@ -1583,26 +1583,48 @@ with tab2:
         "SANTAFE":(19.3600,-99.2600),"SANTA":(19.3600,-99.2600),
         "CUERNAVACA":(18.9242,-99.2216),"TIJUANA":(32.5027,-117.0037),
         "TIJUANAESTECENTRO":(32.5027,-117.0037),
+        # Fix 3 — 5 previously missing stores
+        "GRAN SUR II":(19.3050,-99.1600),"GRAN SUR":(19.3050,-99.1600),
+        "GRANSUR":(19.3050,-99.1600),"GRANSUR II":(19.3050,-99.1600),
+        "MEXICALI":(32.6278,-115.4545),
+        "SLP II":(22.1565,-100.9855),"SLP":(22.1565,-100.9855),
+        "MARIANO OTERO":(20.6400,-103.4100),"MARIANO":(20.6400,-103.4100),
+        "OTERO":(20.6400,-103.4100),
+        "ENSENADA":(31.8667,-116.5960),
     }
+    _ROMAN = {"I","II","III","IV","V","VI","VII","VIII","IX","X"}
+
     def _extract_city(store_nm):
         name = str(store_nm).upper().strip()
-        # normalize accents
         name = ''.join(c for c in _ud.normalize('NFD', name) if _ud.category(c) != 'Mn')
-        name = name.replace("-","_")
-        name = _re_map.sub(r'^\d+_', '', name)
-        for pfx in ["NUM_TIENDA_","TIENDA_","NUM_","STORE_"]:
+        name = name.replace("-", " ").replace("_", " ")
+        name = _re_map.sub(r'^\d+\s*', '', name)
+        for pfx in ["NUM TIENDA ", "TIENDA ", "NUM ", "STORE "]:
             if name.startswith(pfx):
                 name = name[len(pfx):]
                 break
-        name = _re_map.sub(r'_\d+$', '', name)
-        return name.strip()
+        name = _re_map.sub(r'\s+\d+$', '', name).strip()
+        return name
+
     def _find_coords(city_key):
+        if not city_key:
+            return None
+        # 1. exact match
         if city_key in CITY_COORDS:
             return CITY_COORDS[city_key]
+        # 2. first word
+        tokens = city_key.split()
+        if tokens and tokens[0] in CITY_COORDS:
+            return CITY_COORDS[tokens[0]]
+        # 3. last word if not a Roman numeral
+        if tokens and tokens[-1] not in _ROMAN and tokens[-1] in CITY_COORDS:
+            return CITY_COORDS[tokens[-1]]
+        # 4. partial / substring match
         for k, v in CITY_COORDS.items():
             if city_key in k or k in city_key:
                 return v
         return None
+
     stores["ciudad"] = stores["store_nm"].apply(_extract_city)
     def _get_lat(c): r = _find_coords(c); return r[0] if r else None
     def _get_lon(c): r = _find_coords(c); return r[1] if r else None
@@ -1612,7 +1634,9 @@ with tab2:
     _unmatched = stores[stores["lat"].isna()]["store_nm"].tolist()
     if _unmatched:
         with st.expander(f"🔍 {len(_unmatched)} tienda(s) sin coordenadas — haz clic para ver", expanded=False):
-            st.write(_unmatched)
+            st.caption("Estas tiendas no pudieron mapearse. Contacta al administrador para agregar sus coordenadas.")
+            for _u in _unmatched:
+                st.text(f"• {_u}")
     if len(geo_df) > 0:
         geo_df["size_val"] = (geo_df["margen_pct"].clip(lower=0) + 1) * 8
         fig_map = px.scatter_mapbox(
@@ -2439,10 +2463,11 @@ with tab3:
                 ))
                 fig_heat.update_layout(
                     title="S = Subir precio · P = Promover · M = Mantener",
-                    height=max(280, len(pivot)*28+60),
-                    margin=dict(t=45,b=20,l=20,r=20),
+                    height=max(500, len(pivot)*38),
+                    margin=dict(t=80, b=60, l=250, r=30),
                     paper_bgcolor="white", plot_bgcolor="white",
-                    xaxis=dict(side="top"), yaxis=dict(tickfont=dict(size=10)),
+                    xaxis=dict(side="bottom", tickangle=0, tickfont=dict(size=12)),
+                    yaxis=dict(tickfont=dict(size=10)),
                 )
                 st.plotly_chart(fig_heat, use_container_width=True)
                 st.markdown(

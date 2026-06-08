@@ -1452,13 +1452,16 @@ with tab2:
     _mg_min  = float(_mg_vals.min()) if len(_mg_vals) else 0
     _mg_max  = float(_mg_vals.max()) if len(_mg_vals) else 1
     fig_dept.update_layout(
-        title="Ventas totales (barras) · Margen ponderado % (línea amarilla) por departamento",
+        title=dict(
+            text="Ventas totales (barras) · Margen ponderado % (línea amarilla) por departamento",
+            y=0.97, yanchor="top"),
         plot_bgcolor="white", paper_bgcolor="white",
         height=max(350, len(dept_sorted) * 90),
-        margin=dict(t=60, b=60, l=220, r=120),
+        margin=dict(t=100, b=80, l=220, r=130),
         bargap=0.35,
         xaxis=dict(title="Ventas ($)", side="bottom"),
-        xaxis2=dict(title="Margen %", overlaying="x", side="top",
+        xaxis2=dict(title=dict(text="Margen %", standoff=20),
+                    overlaying="x", side="top",
                     showgrid=False, ticksuffix="%",
                     range=[_mg_min * 0.95, _mg_max * 1.05]),
         legend=dict(orientation="h", y=-0.2),
@@ -1631,10 +1634,15 @@ with tab2:
             marker=dict(size=5, color=OM_RED),
             fill="tozeroy", fillcolor="rgba(227,24,55,0.10)",
             hovertemplate="<b>%{x}</b><br>Margen: %{y:.2f}%<extra></extra>"))
-        fig_mg.add_hline(y=avg_margen, line_dash="dash", line_color="#555",
-                         annotation_text=f"Promedio: {avg_margen:.1f}%",
-                         annotation_position="top left",
-                         annotation=dict(xanchor="left", x=first_mes, yshift=10))
+        fig_mg.add_hline(y=avg_margen, line_dash="dash", line_color="#555")
+        fig_mg.add_annotation(
+            x=last_mes, y=avg_margen,
+            text=f"Promedio: {avg_margen:.1f}%",
+            showarrow=False,
+            xanchor="right", yanchor="bottom",
+            yshift=8, xshift=-8,
+            font=dict(size=12, color="#555555"),
+            bgcolor="white", borderpad=3)
         fig_mg.add_annotation(x=last_mes, y=last_val,
                               text=f"{last_val:.1f}%", showarrow=True,
                               arrowhead=2, font=dict(color=OM_RED, size=12),
@@ -2168,13 +2176,30 @@ with tab3:
 
         section("💰 Impacto potencial de negocio — si implementas las recomendaciones")
         st.caption("Estimación del modelo con los datos actuales. Con más historial, la precisión aumenta.")
+        def _kpi_impact(col, label, value_str, color):
+            parts = value_str.split("/")
+            main_val = parts[0]
+            suffix   = "/" + parts[1] if len(parts) > 1 else ""
+            col.markdown(
+                f'<div style="background:white;border-radius:12px;border-top:4px solid {color};'
+                f'padding:20px 16px;text-align:center;min-height:130px;display:flex;'
+                f'flex-direction:column;justify-content:center;'
+                f'box-shadow:0 2px 8px rgba(0,0,0,0.08);margin-bottom:8px;">'
+                f'<div style="font-size:1.9rem;font-weight:800;color:#1A1A1A;line-height:1.1;">'
+                f'{main_val}</div>'
+                f'<div style="font-size:1rem;font-weight:500;color:#555;margin-bottom:4px;">'
+                f'{suffix}</div>'
+                f'<div style="font-size:0.7rem;font-weight:600;color:#666;text-transform:uppercase;'
+                f'letter-spacing:0.05em;margin-top:6px;">{label}</div>'
+                f'</div>', unsafe_allow_html=True)
+
         _ic1, _ic2, _ic3, _ic4 = st.columns(4)
-        kpi(_ic1, f"Subir precio — {len(_sub_pool)} prod. (+10%)",
-            f"+${_ing_sub:,.0f}/mes", OM_BLUE)
-        kpi(_ic2, f"Promover — {len(_prm_pool)} prod. (-10%)",
-            f"+${_ing_prm:,.0f}/mes" if _ing_prm >= 0 else f"${_ing_prm:,.0f}/mes", OM_GREEN)
-        kpi(_ic3, "Unidades extra por promos", f"+{_uds_prm:,.0f}/mes", OM_AMBER)
-        kpi(_ic4, "Impacto total anualizado",  f"+${_total*12:,.0f}/año", OM_RED)
+        _kpi_impact(_ic1, f"Subir precio — {len(_sub_pool)} prod. (+10%)",
+                    f"+${_ing_sub:,.0f}/mes", OM_BLUE)
+        _kpi_impact(_ic2, f"Promover — {len(_prm_pool)} prod. (-10%)",
+                    f"+${_ing_prm:,.0f}/mes" if _ing_prm >= 0 else f"${_ing_prm:,.0f}/mes", OM_GREEN)
+        _kpi_impact(_ic3, "Unidades extra por promos", f"+{_uds_prm:,.0f}/mes", OM_AMBER)
+        _kpi_impact(_ic4, "Impacto total anualizado",  f"+${_total*12:,.0f}/año", OM_RED)
         st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Selector: general o por producto ─────────────────────────────────────

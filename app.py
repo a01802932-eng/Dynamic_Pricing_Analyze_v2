@@ -991,8 +991,8 @@ def run_ml_pipeline(df_csv: bytes, promo_bytes: bytes):
     mes_idx_ev = {m: i for i, m in enumerate(all_months_ord)}
     mensual["mes_num_ev"] = mensual["mes_str"].map(mes_idx_ev)
     modal_p = mensual.groupby("prod_nbr")["precio"].agg(lambda x: x.mode().iloc[0] if len(x.mode())>0 else x.median())
-    mensual["caida_pct_ev"] = ((modal_p[mensual["prod_nbr"].values].values - mensual["precio"].values)
-                                / modal_p[mensual["prod_nbr"].values].values * 100)
+    mensual["precio_modal_ev"] = mensual["prod_nbr"].map(modal_p)
+    mensual["caida_pct_ev"]    = ((mensual["precio_modal_ev"] - mensual["precio"]) / mensual["precio_modal_ev"] * 100).fillna(0)
 
     # Detectar eventos: secuencias consecutivas de meses con caída >= 20%
     eventos_ev = []

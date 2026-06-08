@@ -18,11 +18,15 @@ warnings.filterwarnings("ignore")
 # ══════════════════════════════════════════════════════════════════════════════
 # CONSTANTS
 # ══════════════════════════════════════════════════════════════════════════════
-OM_RED   = "#E31837"
-OM_BLUE  = "#1565C0"
-OM_GREEN = "#2E7D32"
-OM_AMBER = "#F9A825"
-OM_LGRAY = "#9E9E9E"
+OM_RED    = "#E31837"
+OM_YELLOW = "#FFD100"
+OM_BLACK  = "#1A1A1A"
+OM_WHITE  = "#FFFFFF"
+OM_GRAY   = "#F5F5F5"
+OM_BLUE   = "#1565C0"
+OM_GREEN  = "#2E7D32"
+OM_AMBER  = "#F9A825"
+OM_LGRAY  = "#9E9E9E"
 
 REC_COLORS = {
     "Subir precio":     OM_BLUE,
@@ -62,6 +66,17 @@ html, body, [class*="css"] { font-family: 'Roboto', Arial, sans-serif !important
 [data-testid="stSidebar"] { background-color: #1A1A1A !important; }
 [data-testid="stSidebar"] * { color: #FFFFFF !important; }
 [data-testid="stSidebar"] .stMarkdown p { font-size:13px !important; }
+[data-testid="stSidebar"] .stFileUploader label { color:#FFD100 !important; font-weight:700 !important; }
+[data-testid="stSidebar"] .stExpander { border:1px solid #333 !important; border-radius:8px !important; }
+.sidebar-logo-wrap { text-align:center; padding:12px 0 6px 0; }
+.sidebar-divider { border:none; border-top:1px solid #333; margin:12px 0; }
+.sidebar-section-label { font-size:13px; font-weight:700; color:#FFD100 !important;
+    letter-spacing:0.5px; text-transform:uppercase; margin:10px 0 4px 0; }
+.sidebar-hint { font-size:11px; color:#aaa !important; line-height:1.5; margin:0 0 8px 0; }
+.sidebar-status-ok  { background:#1B5E20; color:#fff; border-radius:6px; padding:5px 10px;
+    font-size:12px; font-weight:700; margin:4px 0; }
+.sidebar-status-err { background:#B71C1C; color:#fff; border-radius:6px; padding:5px 10px;
+    font-size:12px; font-weight:700; margin:4px 0; }
 .kpi-card { background:white; border-radius:12px; padding:18px 12px; text-align:center;
     box-shadow:0 2px 8px rgba(0,0,0,0.07); border-top:4px solid #E31837; }
 .kpi-value { font-size:26px; font-weight:900; color:#1A1A1A; }
@@ -87,6 +102,8 @@ html, body, [class*="css"] { font-family: 'Roboto', Arial, sans-serif !important
     border-radius:12px; font-size:11px; font-weight:700; }
 .action-badge-mantener { background:#F9A825; color:white; padding:3px 10px;
     border-radius:12px; font-size:11px; font-weight:700; }
+.insight-box { background:#FFF8E1; border-left:4px solid #FFD100; border-radius:0 8px 8px 0;
+    padding:8px 14px; font-size:13px; color:#333; margin:6px 0 16px 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -490,25 +507,29 @@ def _fmt_bar(fig, values, prefix="$", suffix="", decimals=0):
 # SIDEBAR
 # ══════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
-    st.markdown("""
-    <div style="text-align:center; padding:16px 0 10px 0;">
-        <span style="font-size:26px; font-weight:900; color:#E31837;">OFFICEMAX</span><br>
-        <span style="font-size:10px; color:#aaa; letter-spacing:2px;">DYNAMIC PRICING ANALYZER</span>
-    </div>
-    <hr style="border-color:#333; margin:6px 0 16px 0;">
-    """, unsafe_allow_html=True)
+    # ── Logo ────────────────────────────────────────────────────────────────
+    try:
+        st.image("static/logo-officemax.png", width=180)
+    except Exception:
+        st.markdown("""
+        <div class="sidebar-logo-wrap">
+            <span style="font-size:26px;font-weight:900;color:#E31837;">OFFICEMAX</span><br>
+            <span style="font-size:9px;color:#aaa;letter-spacing:2px;">DYNAMIC PRICING ANALYZER</span>
+        </div>""", unsafe_allow_html=True)
 
-    st.markdown("### 📦 Cargar datos")
-    st.caption("Sube el ZIP con los 4 archivos CSV.")
-    uploaded = st.file_uploader("Archivo .ZIP", type=["zip"], label_visibility="collapsed")
+    st.markdown("<hr class='sidebar-divider'>", unsafe_allow_html=True)
+
+    # ── Sección 1: Carga de datos ────────────────────────────────────────────
+    st.markdown('<p class="sidebar-section-label">📦 Carga tus datos</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sidebar-hint">Tu ZIP debe contener 4 archivos: Ventas · Catálogo · Precios · Costos</p>',
+                unsafe_allow_html=True)
+    uploaded = st.file_uploader("Archivo ZIP con datos", type=["zip"], label_visibility="collapsed")
 
     if uploaded:
-        # Solo procesar si es un archivo NUEVO — el file_uploader retiene el archivo
-        # en cada re-render, lo que ejecutaría este bloque (y borraría results) en cada clic.
         is_new_file = st.session_state.get("loaded_file_name") != uploaded.name
         if is_new_file:
             raw_bytes = uploaded.read()
-            with st.spinner("Leyendo y limpiando..."):
+            with st.spinner("Leyendo y limpiando datos..."):
                 try:
                     df_main, report_df = load_and_clean(raw_bytes)
                     st.session_state["df_main"]          = df_main
@@ -516,30 +537,88 @@ with st.sidebar:
                     st.session_state["results"]          = None
                     st.session_state["df_csv_bytes"]     = df_main.to_csv(index=False).encode("utf-8")
                     st.session_state["loaded_file_name"] = uploaded.name
-                    st.success("✅ Datos cargados")
-                    st.caption(report_df.iloc[-1]["Detalle"])
+                    _detail = report_df.iloc[-1]["Detalle"]
+                    st.markdown(f'<div class="sidebar-status-ok">✅ Listo — {_detail}</div>',
+                                unsafe_allow_html=True)
                 except Exception as e:
-                    st.error(f"❌ {e}")
+                    st.markdown(f'<div class="sidebar-status-err">❌ Error: {e}</div>',
+                                unsafe_allow_html=True)
         else:
-            st.success("✅ Datos cargados")
-            st.caption(st.session_state["clean_report"].iloc[-1]["Detalle"] if st.session_state["clean_report"] is not None else "")
+            _rpt = st.session_state.get("clean_report")
+            _det = _rpt.iloc[-1]["Detalle"] if _rpt is not None else "Datos en memoria"
+            st.markdown(f'<div class="sidebar-status-ok">✅ Listo — {_det}</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="sidebar-status-err">⬆️ Sube tu archivo ZIP para comenzar</div>',
+                    unsafe_allow_html=True)
 
-    st.markdown("<hr style='border-color:#333; margin:16px 0;'>", unsafe_allow_html=True)
-    st.markdown("### 🏷️ Promociones *(opcional)*")
-    st.caption("Excel de promociones para el pipeline ML.")
-    uploaded_promo = st.file_uploader("Excel de Promociones", type=["xlsx","xls"],
+    st.markdown("<hr class='sidebar-divider'>", unsafe_allow_html=True)
+
+    # ── Sección 2: Promociones ───────────────────────────────────────────────
+    st.markdown('<p class="sidebar-section-label">🏷️ Promociones (opcional)</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sidebar-hint">Sube tu calendario de promos para ver cuáles realmente funcionaron</p>',
+                unsafe_allow_html=True)
+    uploaded_promo = st.file_uploader("Excel de promociones", type=["xlsx","xls"],
                                        label_visibility="collapsed", key="promo_uploader")
     if uploaded_promo:
         if st.session_state.get("promo_file_name") != uploaded_promo.name:
             st.session_state["promo_bytes"]     = uploaded_promo.read()
             st.session_state["promo_file_name"] = uploaded_promo.name
             st.session_state["ml_results"]      = None
-            st.success("✅ Promociones cargadas")
-        else:
-            st.success("✅ Promociones cargadas")
+        st.markdown('<div class="sidebar-status-ok">✅ Promociones cargadas</div>', unsafe_allow_html=True)
 
-    st.markdown("<hr style='border-color:#333; margin:16px 0;'>", unsafe_allow_html=True)
-    st.caption("**Flujo recomendado:**\n\n1. Sube el ZIP\n2. **Calculadora** → ejecuta el modelo\n3. **Descriptivo** → explora los datos\n4. **Predictivo** → ve qué hacer")
+    st.markdown("<hr class='sidebar-divider'>", unsafe_allow_html=True)
+
+    # ── Sección 3: Configuración avanzada (colapsada) ────────────────────────
+    with st.expander("⚙️ Configuración avanzada", expanded=False):
+        st.caption("Los valores predeterminados funcionan bien para datos de OfficeMax. Cámbialos solo si salen muy pocos productos.")
+        min_obs = st.slider("Meses mínimos por producto", 3, 18, 6,
+            help="Mínimo de meses con datos para analizar un producto. Baja a 4-5 si salen muy pocos.")
+        min_r2 = st.slider("Precisión mínima del modelo (R²)", 0.0, 0.5, 0.0, 0.05,
+            help="En retail, 0.10-0.20 ya es aceptable. No uses 0.5+.")
+        max_beta = st.slider("Sensibilidad máxima al precio", 2.0, 15.0, 10.0, 0.5,
+            help="Elasticidades mayores a 5 suelen ser errores estadísticos.")
+        min_cv_pct = st.slider("Variación mínima de precio (%)", 0.0, 10.0, 1.0, 0.5,
+            help="Si el precio nunca cambió, no se puede estimar la sensibilidad. 1% es permisivo.")
+        min_cv = min_cv_pct / 100
+        pval_thresh = st.slider("Nivel de confianza estadística", 0.05, 0.25, 0.10, 0.05,
+            help="0.10 = 90% de confianza (estándar en análisis de negocio).")
+        run_rolling = st.checkbox(
+            "Calcular tendencia trimestral y semestral (~1-3 min extra)", value=False,
+            help="Activa para ver cómo cambia la sensibilidad al precio a lo largo del tiempo.")
+
+    st.markdown("<hr class='sidebar-divider'>", unsafe_allow_html=True)
+
+    # ── Botón principal CTA ──────────────────────────────────────────────────
+    _datos_listos = st.session_state.get("df_csv_bytes") is not None
+    run_btn = st.button(
+        "🔍 Analizar mi catálogo",
+        type="primary",
+        use_container_width=True,
+        disabled=not _datos_listos,
+    )
+    if not _datos_listos:
+        st.markdown('<p class="sidebar-hint" style="text-align:center;">Sube primero tu archivo ZIP</p>',
+                    unsafe_allow_html=True)
+
+    if run_btn and _datos_listos:
+        csv_bytes = st.session_state["df_csv_bytes"]
+        with st.spinner("⚙️ Analizando tu catálogo… esto tarda unos 30 segundos"):
+            try:
+                res = run_models(df_csv=csv_bytes, min_obs=min_obs, min_cv=min_cv,
+                                 min_r2=min_r2, max_beta=max_beta, pval_thresh=pval_thresh,
+                                 run_rolling=run_rolling)
+                st.session_state["results"] = res
+            except Exception as e:
+                st.error(f"Error en el análisis: {e}")
+        with st.spinner("🌲 Entrenando modelos de predicción…"):
+            try:
+                promo_b = st.session_state.get("promo_bytes") or b""
+                ml_res = run_ml_pipeline(csv_bytes, promo_b)
+                st.session_state["ml_results"] = ml_res
+            except Exception as e:
+                st.warning(f"Análisis ML no completado: {e}")
+        st.success("✅ Listo — revisa las pestañas")
+        st.session_state["ai_analysis"] = None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -833,197 +912,162 @@ def run_ml_pipeline(df_csv: bytes, promo_bytes: bytes):
             "dept_pivot":dept_pivot,"sku_mes":sku_mes,"promo_eval":promo_eval}
 
 
-tab1, tab2, tab3 = st.tabs(["🧮  Calculadora","📈  Dashboard Descriptivo","🎯  Dashboard Predictivo"])
+tab1, tab2, tab3 = st.tabs(["💡  Recomendaciones","📊  Resumen de Ventas","🎯  Inteligencia de Precios"])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — CALCULADORA
 # ══════════════════════════════════════════════════════════════════════════════
 with tab1:
-    with st.expander("📋 Reporte de limpieza de datos", expanded=False):
-        for _, row in clean_report.iterrows():
-            c = OM_GREEN if "✅" in str(row["Paso"]) else (OM_RED if "🗑" in str(row["Paso"]) else OM_BLUE)
-            st.markdown(
-                f'<div class="clean-step" style="border-left-color:{c};">'
-                f'<strong>{row["Paso"]}</strong>&nbsp;&nbsp;'
-                f'<span style="color:{OM_RED}; font-weight:700;">{row["Eliminadas"]}</span>'
-                f'&nbsp;&nbsp;<span style="color:#555;">{row["Detalle"]}</span></div>',
-                unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    section("⚙️ Parámetros del modelo")
-    st.caption("Ajusta estos valores antes de ejecutar. Si salen pocos productos, reduce el mínimo de meses o el CV.")
-
-    c1,c2,c3,c4,c5 = st.columns(5)
-    with c1:
-        min_obs = st.slider("Meses mínimos por SKU", 3, 18, 6,
-            help="Mínimo de meses con datos para analizar un SKU. Con menos de 6 los resultados son poco confiables. Baja a 4-5 solo si salen muy pocos productos.")
-    with c2:
-        min_r2 = st.slider("R² mínimo", 0.0, 0.5, 0.0, 0.05,
-            help="Qué tan bien explica el precio las ventas. En retail 0.10-0.20 ya es aceptable. No uses 0.7+.")
-    with c3:
-        max_beta = st.slider("|Beta| máximo", 2.0, 15.0, 10.0, 0.5,
-            help="Elasticidad máxima aceptable. Betas mayores a 5 suelen ser errores estadísticos.")
-    with c4:
-        min_cv_pct = st.slider("CV mínimo de precio (%)", 0.0, 10.0, 1.0, 0.5,
-            help="Si el precio nunca cambió, no se puede estimar elasticidad. 1% es un umbral permisivo.")
-        min_cv = min_cv_pct / 100
-    with c5:
-        pval_thresh = st.slider("p-valor máximo", 0.05, 0.25, 0.10, 0.05,
-            help="Qué tan seguro eres de la beta. 0.10 = 90% de confianza (estándar en negocios).")
-
-    run_rolling = st.checkbox(
-        "Calcular Tendencia Trimestral y Semestral (~1-3 min extra)", value=False,
-        help="Activa para ver cómo cambia la elasticidad a lo largo del tiempo (ventanas de 3 y 6 meses). Necesario para el calendario temporal detallado.")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    run_btn = st.button("▶️  Ejecutar análisis de elasticidad", type="primary")
-
-    if run_btn:
-        csv_bytes = st.session_state["df_csv_bytes"]
-        with st.spinner("⚙️ Paso 1/2 — Calculando elasticidad OLS..."):
-            try:
-                res = run_models(df_csv=csv_bytes, min_obs=min_obs, min_cv=min_cv,
-                                 min_r2=min_r2, max_beta=max_beta, pval_thresh=pval_thresh,
-                                 run_rolling=run_rolling)
-                st.session_state["results"] = res
-            except Exception as e:
-                st.error(f"Error OLS: {e}"); st.exception(e)
-        with st.spinner("🌲 Paso 2/2 — Ejecutando pipeline ML (RF vs Gradient Boosting)..."):
-            try:
-                promo_b = st.session_state.get("promo_bytes") or b""
-                ml_res = run_ml_pipeline(csv_bytes, promo_b)
-                st.session_state["ml_results"] = ml_res
-            except Exception as e:
-                st.warning(f"Pipeline ML no completado: {e}")
-        st.success("✅ Análisis completado — ve al Dashboard Predictivo")
-
     results = st.session_state["results"]
     if results is None:
-        st.info("Configura los parámetros y presiona **▶️ Ejecutar análisis**.")
-    else:
-        df_m1a = results["m1a"]; m2 = results["m2"]
+        st.info("⬅️ Sube tu archivo ZIP y presiona **🔍 Analizar mi catálogo** en el panel izquierdo para ver las recomendaciones.")
+        st.stop()
 
-        section("🔬 OLS por SKU — ¿cuánto cambia la demanda si cambia el precio?")
-        st.caption("Regresión log-log individual por producto. No predice ventas totales — "
-                   "estima la elasticidad β: cuánto cambia la demanda ante un 1% de cambio en precio.")
+    df_m1a = results["m1a"]; m2 = results["m2"]
+    n_valid = len(df_m1a[df_m1a["recomendacion"]!="No recomendable"]) if len(df_m1a)>0 else 0
 
-        n_valid = len(df_m1a[df_m1a["recomendacion"]!="No recomendable"]) if len(df_m1a)>0 else 0
+    # ── 4 KPI cards arriba ───────────────────────────────────────────────────
+    rec_counts_t1 = df_m1a["recomendacion"].value_counts() if len(df_m1a)>0 else {}
+    n_sub_t1 = int(rec_counts_t1.get("Subir precio",0))
+    n_pro_t1 = int(rec_counts_t1.get("Bajar / Promover",0))
+    _imp_t1 = 0
+    if len(results["sim"])>0:
+        def _qdelta(recs, esc):
+            ns = df_m1a[df_m1a["recomendacion"].isin(recs)]["prod_nm"].tolist()
+            b = results["sim"][(results["sim"]["prod_nm"].isin(ns))&(results["sim"]["cambio"]=="Base 0%")]["ingreso_est"].sum()
+            t = results["sim"][(results["sim"]["prod_nm"].isin(ns))&(results["sim"]["cambio"]==esc)]["ingreso_est"].sum()
+            return t - b
+        _imp_t1 = _qdelta(["Subir precio"],"+10%") + _qdelta(["Bajar / Promover"],"-10%")
 
+    kc1,kc2,kc3,kc4 = st.columns(4)
+    kpi(kc1, "Productos analizados",       f"{len(df_m1a):,}",            OM_RED)
+    kpi(kc2, "✅ Sube el precio",           f"{n_sub_t1} productos",        OM_BLUE)
+    kpi(kc3, "📢 Lanza una promoción",      f"{n_pro_t1} productos",        OM_GREEN)
+    kpi(kc4, "Impacto mensual estimado",   f"+${_imp_t1:,.0f} MXN",        OM_AMBER)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Validación de calidad ────────────────────────────────────────────────
+    with st.expander("📋 Detalle de calidad de datos", expanded=False):
+        clean_rpt = st.session_state.get("clean_report")
+        if clean_rpt is not None:
+            for _, row in clean_rpt.iterrows():
+                c = OM_GREEN if "✅" in str(row["Paso"]) else (OM_RED if "🗑" in str(row["Paso"]) else OM_BLUE)
+                st.markdown(
+                    f'<div class="clean-step" style="border-left-color:{c};">'
+                    f'<strong>{row["Paso"]}</strong>&nbsp;&nbsp;'
+                    f'<span style="color:{OM_RED};font-weight:700;">{row["Eliminadas"]}</span>'
+                    f'&nbsp;&nbsp;<span style="color:#555;">{row["Detalle"]}</span></div>',
+                    unsafe_allow_html=True)
         if len(df_m1a) > 0:
-            validos_df  = df_m1a[df_m1a["recomendacion"]!="No recomendable"]
-            r2_prom     = df_m1a["r2"].mean()
-            r2_validos  = validos_df["r2"].mean() if len(validos_df)>0 else 0
-            beta_median = df_m1a["beta"].median()
-            pct_sig     = (df_m1a["pval"] < 0.10).mean() * 100
-
-            # Semáforo basado en métricas agregadas M1A
+            validos_df = df_m1a[df_m1a["recomendacion"]!="No recomendable"]
+            r2_validos = validos_df["r2"].mean() if len(validos_df)>0 else 0
+            pct_sig    = (df_m1a["pval"] < 0.10).mean() * 100
             if r2_validos >= 0.35 and pct_sig >= 30:
-                css_v, msg_v = "chip-green",  "🟢 Modelo confiable — resultados interpretables"
+                css_v, msg_v = "chip-green",  "🟢 Modelo estadísticamente confiable"
             elif r2_validos >= 0.15 and pct_sig >= 15:
                 css_v, msg_v = "chip-yellow", "🟡 Modelo aceptable — úsalo con precaución"
             else:
-                css_v, msg_v = "chip-red",    "🔴 Señal débil — reduce filtros o revisa datos"
+                css_v, msg_v = "chip-red",    "🔴 Señal débil — reduce filtros en Configuración avanzada"
+            st.markdown(f'<br><div class="{css_v}">{msg_v}</div>', unsafe_allow_html=True)
+            st.caption(f"Precisión promedio del modelo: {r2_validos:.1%} · "
+                       f"Productos estadísticamente confiables: {pct_sig:.0f}%")
 
-            cv1, cv2 = st.columns([1, 2])
-            with cv1:
-                st.markdown(f'<div class="{css_v}">{msg_v}</div><br>', unsafe_allow_html=True)
-                st.caption(f"✅ R² promedio (SKUs válidos): {r2_validos:.3f}")
-                st.caption(f"✅ Beta mediana: {beta_median:.3f}")
-                st.caption(f"✅ SKUs con p < 0.10: {pct_sig:.1f}%")
-                st.caption(f"{'✅' if m2['beta_pval']<0.10 else '⚠️'} Señal global precio: p={m2['beta_pval']:.4f}")
-            with cv2:
-                st.dataframe(pd.DataFrame({
-                    "Métrica": ["SKUs analizados","SKUs con rec. válida","R² promedio (todos SKUs)",
-                                "R² promedio (SKUs válidos)","Beta mediana",
-                                "% SKUs con p < 0.10","Observaciones en modelo global"],
-                    "Valor":   [f"{len(df_m1a):,}", f"{n_valid:,}",
-                                f"{r2_prom:.4f}", f"{r2_validos:.4f}",
-                                f"{beta_median:.4f}", f"{pct_sig:.1f}%",
-                                f"{m2['n_obs']:,}"],
-                    "Interpretación": [
-                        "Productos con suficientes datos para OLS",
-                        "Pasan todos los filtros estadísticos",
-                        "R² varía por SKU; productos con poca var. de precio tienen R² bajo",
-                        "R² de los modelos que sí son estadísticamente válidos",
-                        "Elasticidad típica: negativa = más precio → menos ventas",
-                        "Porcentaje con relación precio-demanda estadísticamente significativa",
-                        "Usado para validar que la señal existe a nivel agregado",
-                    ]
-                }), hide_index=True, use_container_width=True)
-        st.markdown("<br>", unsafe_allow_html=True)
-        section(f"📦 Elasticidad Total por producto — {len(df_m1a):,} analizados de {results['n_total']:,} · {n_valid} con recomendación válida")
+    st.markdown("<br>", unsafe_allow_html=True)
+    section(f"📦 Plan de acción — {n_valid} productos con recomendación de {len(df_m1a):,} analizados")
+    st.caption("Filtra por departamento o recomendación para encontrar los productos que te interesan.")
 
-        if len(df_m1a) == 0:
-            st.warning("⚠️ Ningún SKU pasó los filtros. Prueba reduciendo el mínimo de meses a 3 o el CV a 0%.")
-        else:
-            rec_counts = df_m1a["recomendacion"].value_counts()
-            c_rec = st.columns(4)
-            for i,(rec,color) in enumerate(REC_COLORS.items()):
-                cnt = rec_counts.get(rec,0); pct = cnt/len(df_m1a)*100
-                c_rec[i].markdown(
-                    f'<div class="rec-card" style="border-top:4px solid {color};">'
-                    f'<div style="font-size:32px;font-weight:900;color:{color};">{cnt}</div>'
-                    f'<div style="font-size:12px;font-weight:700;color:#333;">{rec.upper()}</div>'
-                    f'<div style="font-size:11px;color:#999;">{pct:.1f}% del total</div></div>',
-                    unsafe_allow_html=True)
+    if len(df_m1a) == 0:
+        st.warning("⚠️ Ningún producto pasó los filtros. Prueba bajando el mínimo de meses o la variación de precio en Configuración avanzada.")
+    else:
+        fc1,fc2,fc3 = st.columns(3)
+        with fc1:
+            depts = sorted(df_m1a["dept_nm"].dropna().unique().tolist())
+            dept_f = st.multiselect("Departamento", depts, key="dept_f_cal")
+        with fc2:
+            _rec_labels = {
+                "Subir precio":     "✅ Sube el precio",
+                "Mantener precio":  "➡️ Mantén el precio",
+                "Bajar / Promover": "📢 Lanza una promoción",
+                "No recomendable":  "⚪ Sin recomendación",
+            }
+            rec_f = st.multiselect("Recomendación", list(_rec_labels.values()), key="rec_f_cal")
+            _rec_reverse = {v:k for k,v in _rec_labels.items()}
+            rec_f_orig = [_rec_reverse[r] for r in rec_f if r in _rec_reverse]
+        with fc3:
+            srch = st.text_input("Buscar producto o SKU", placeholder="Ej: FOLDER, 50012983")
 
-            st.markdown("<br>", unsafe_allow_html=True)
-            fc1,fc2,fc3 = st.columns(3)
-            with fc1:
-                depts = sorted(df_m1a["dept_nm"].dropna().unique().tolist())
-                dept_f = st.multiselect("Filtrar departamento", depts, key="dept_f_cal")
-            with fc2:
-                rec_f = st.multiselect("Filtrar recomendación", list(REC_COLORS.keys()), key="rec_f_cal")
-            with fc3:
-                srch = st.text_input("Buscar nombre o SKU", placeholder="Ej: FOLDER, 50012983")
+        show = df_m1a.copy()
+        if dept_f:    show = show[show["dept_nm"].isin(dept_f)]
+        if rec_f_orig:show = show[show["recomendacion"].isin(rec_f_orig)]
+        if srch:
+            show = show[show["prod_nm"].str.contains(srch,case=False,na=False)|
+                        show["prod_nbr"].str.contains(srch,case=False,na=False)]
 
-            show = df_m1a.copy()
-            if dept_f: show = show[show["dept_nm"].isin(dept_f)]
-            if rec_f:  show = show[show["recomendacion"].isin(rec_f)]
-            if srch:
-                show = show[show["prod_nm"].str.contains(srch,case=False,na=False)|
-                            show["prod_nbr"].str.contains(srch,case=False,na=False)]
-
-            disp = [c for c in ["prod_nbr","prod_nm","dept_nm","beta","r2","rmse","pval","n_meses","recomendacion"] if c in show.columns]
-            st.dataframe(show[disp].rename(columns={
+        # Tabla principal — columnas de negocio
+        show_disp = show[["prod_nbr","prod_nm","dept_nm","recomendacion","n_meses","pval"]].copy()
+        show_disp["accion_sugerida"] = show_disp["recomendacion"].map({
+            "Subir precio":     "✅ Sube el precio — los clientes no se van",
+            "Mantener precio":  "➡️ Mantén el precio — estás en el punto óptimo",
+            "Bajar / Promover": "📢 Lanza una promoción — bajar el precio genera volumen",
+            "No recomendable":  "⚪ Datos insuficientes",
+        })
+        show_disp["confiabilidad"] = show_disp["pval"].apply(
+            lambda p: "Alta ✅" if p < 0.05 else ("Media ⚠️" if p < 0.10 else "Baja ❌"))
+        disp_cols = ["prod_nbr","prod_nm","dept_nm","accion_sugerida","n_meses","confiabilidad"]
+        st.dataframe(
+            show_disp[disp_cols].rename(columns={
                 "prod_nbr":"SKU","prod_nm":"Producto","dept_nm":"Departamento",
-                "beta":"Beta","r2":"R²","rmse":"RMSE","pval":"p-valor",
-                "n_meses":"Meses","recomendacion":"Recomendación"}).sort_values("Beta"),
-                hide_index=True, use_container_width=True, height=380)
+                "accion_sugerida":"Acción Sugerida","n_meses":"Meses de datos",
+                "confiabilidad":"Confiabilidad"}),
+            hide_index=True, use_container_width=True, height=380)
 
-            st.markdown("<br>", unsafe_allow_html=True)
-            dl1,dl2 = st.columns(2)
-            with dl1:
-                st.download_button("⬇️ Descargar resultados por SKU (CSV)",
-                    df_m1a.to_csv(index=False).encode("utf-8"),"elasticidad_sku.csv","text/csv")
-            with dl2:
-                if len(results["sim"])>0:
-                    st.download_button("⬇️ Descargar simulación de precios (CSV)",
-                        results["sim"].to_csv(index=False).encode("utf-8"),"simulacion_precios.csv","text/csv")
+        with st.expander("🔬 Ver detalles técnicos (elasticidades, R², p-valor)", expanded=False):
+            st.caption("Índice de sensibilidad al precio (β): valor negativo = más precio → menos ventas. "
+                       "Entre más negativo, más sensibles son los clientes.")
+            tech_cols = [c for c in ["prod_nbr","prod_nm","dept_nm","beta","r2","rmse","pval","n_meses","recomendacion"] if c in show.columns]
+            st.dataframe(show[tech_cols].rename(columns={
+                "prod_nbr":"SKU","prod_nm":"Producto","dept_nm":"Departamento",
+                "beta":"Índice de sensibilidad al precio",
+                "r2":"Precisión del modelo (R²)","rmse":"Error medio (RMSE)",
+                "pval":"Confianza estadística (p-valor)",
+                "n_meses":"Meses de datos","recomendacion":"Recomendación"
+            }).sort_values("Índice de sensibilidad al precio"),
+            hide_index=True, use_container_width=True, height=300)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        dl1,dl2 = st.columns(2)
+        with dl1:
+            st.download_button("⬇️ Descargar plan de acción (CSV)",
+                df_m1a.to_csv(index=False).encode("utf-8"),"plan_de_accion.csv","text/csv")
+        with dl2:
+            if len(results["sim"])>0:
+                st.download_button("⬇️ Descargar simulación de precios (CSV)",
+                    results["sim"].to_csv(index=False).encode("utf-8"),"simulacion_precios.csv","text/csv")
 
         # ── Validación visual del modelo (usa ML si está disponible) ────────────
         st.markdown("<br>", unsafe_allow_html=True)
         _ml_scatter = st.session_state.get("ml_results")
         if _ml_scatter and _ml_scatter.get("actual_r"):
-            section("🎯 ¿Qué tan bien predice el modelo? — Gradient Boosting (Ventas en $)")
-            st.caption("Validación del modelo ML en el conjunto de prueba (últimos 6 meses no vistos durante el entrenamiento). "
-                       "Entre más cerca de la diagonal, mejor predice el modelo.")
+            section("🎯 ¿Qué tan preciso es el modelo de predicción?")
+            st.caption("El modelo aprendió con datos históricos y se probó con ventas que nunca había visto. "
+                       "Cada punto es un mes de ventas de un producto — entre más cerca de la línea diagonal, mejor predice.")
             actual = _ml_scatter["actual_r"]
             fitted = _ml_scatter["fitted_r"]
             r2_show = _ml_scatter["r2_r"]
             n_train = _ml_scatter["n_train"]
             n_test  = _ml_scatter["n_test"]
-            model_label = f"Gradient Boosting — {_ml_scatter.get('ganador','ML')}"
+            model_label = "Modelo de predicción de ventas"
         else:
-            section("🎯 ¿Qué tan bien predice el modelo? — Predicción vs Realidad")
-            st.caption("Validación del modelo OLS global (M2) con controles de tienda y mes.")
+            section("🎯 ¿Qué tan preciso es el modelo de predicción?")
+            st.caption("Comparación entre ventas reales y ventas estimadas por el modelo.")
             actual = m2.get("actual_sample", [])
             fitted = m2.get("fitted_sample", [])
             r2_show = m2["r2"]
             n_train = m2["n_obs"]
             n_test  = 0
-            model_label = "OLS Global (M2)"
+            model_label = "Modelo de elasticidad"
 
         if actual and fitted:
             vv1, vv2 = st.columns([2, 1])
@@ -1033,7 +1077,7 @@ with tab1:
                 fig.add_trace(go.Scatter(
                     x=actual, y=fitted, mode="markers",
                     marker=dict(size=4, color=OM_RED, opacity=0.35),
-                    hovertemplate="Real: $%{x:,.0f}<br>Predicho: $%{y:,.0f}<extra></extra>",
+                    hovertemplate="Ventas reales: $%{x:,.0f}<br>Ventas estimadas: $%{y:,.0f}<extra></extra>",
                     name="Observaciones"))
                 fig.add_trace(go.Scatter(
                     x=[0, max_val], y=[0, max_val],
@@ -1043,7 +1087,7 @@ with tab1:
                     plot_bgcolor="white", paper_bgcolor="white",
                     height=380, margin=dict(t=30,b=40,l=40,r=20),
                     xaxis=dict(title="Ventas reales ($)", range=[0, max_val]),
-                    yaxis=dict(title="Ventas predichas ($)", range=[0, max_val]),
+                    yaxis=dict(title="Ventas estimadas por el modelo ($)", range=[0, max_val]),
                     legend=dict(orientation="h", y=1.05))
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -1056,17 +1100,16 @@ with tab1:
                             border-top:5px solid {r2_color}; margin-bottom:16px;">
                     <div style="font-size:48px;font-weight:900;color:{r2_color};">{r2_pct:.1f}%</div>
                     <div style="font-size:13px;color:#555;margin-top:6px;">
-                        de la variación en ventas explicada por el modelo
+                        Precisión del modelo de predicción de ventas
                     </div>
-                    <div style="font-size:11px;color:#999;margin-top:4px;">R² — {model_label}</div>
+                    <div style="font-size:11px;color:#999;margin-top:4px;">{model_label}</div>
                 </div>
                 <div style="background:white;border-radius:14px;padding:18px;
                             box-shadow:0 2px 8px rgba(0,0,0,0.08);">
                     <div style="font-size:12px;color:#555;line-height:2.2;">
-                    <b>Observaciones entrenamiento:</b> {n_train:,}<br>
-                    <b>Observaciones prueba:</b> {n_test:,}<br>
-                    <b>SKUs con rec. válida (OLS):</b> {n_valid}<br>
-                    <b>Modelo ML:</b> {model_label}
+                    <b>Registros de entrenamiento:</b> {n_train:,}<br>
+                    <b>Registros de prueba:</b> {n_test:,}<br>
+                    <b>Productos con recomendación:</b> {n_valid}
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -1274,16 +1317,16 @@ with tab2:
     kpis = agg["kpis"]
 
     # KPIs
-    section("📊 Indicadores clave")
+    section("📊 Indicadores clave del negocio")
     kc = st.columns(8)
-    kpi(kc[0],"Venta total",         f"${kpis['venta']/1e6:.1f}M",              OM_RED)
-    kpi(kc[1],"Unidades vendidas",   f"{kpis['unidades']/1e3:.0f}K",             OM_BLUE)
-    kpi(kc[2],"Ticket promedio",     f"${kpis['ticket_prom']:,.0f}",             OM_AMBER)
-    kpi(kc[3],"Precio prom. unit.",  f"${kpis['precio_prom']:,.2f}",             OM_BLUE)
-    kpi(kc[4],"SKUs únicos",         f"{kpis['n_skus']:,}",                      OM_GREEN)
-    kpi(kc[5],"Tiendas",             f"{kpis['n_stores']}",                      OM_AMBER)
-    kpi(kc[6],"Margen promedio",     f"{kpis['margen']:.1f}%",                   "#7B1FA2")
-    kpi(kc[7],"Margen en dinero",    f"${kpis['margen_dinero']/1e6:.1f}M",      OM_GREEN)
+    kpi(kc[0], "Ventas totales",              f"${kpis['venta']/1e6:.1f}M",           OM_RED)
+    kpi(kc[1], "Unidades vendidas",           f"{kpis['unidades']/1e3:.0f}K",          OM_BLUE)
+    kpi(kc[2], "Ticket promedio por compra",  f"${kpis['ticket_prom']:,.0f}",          OM_AMBER)
+    kpi(kc[3], "Precio promedio por unidad",  f"${kpis['precio_prom']:,.2f}",          OM_BLUE)
+    kpi(kc[4], "Productos distintos",         f"{kpis['n_skus']:,}",                   OM_GREEN)
+    kpi(kc[5], "Tiendas activas",             f"{kpis['n_stores']}",                   OM_AMBER)
+    kpi(kc[6], "Margen de utilidad",          f"{kpis['margen']:.1f}%",                "#7B1FA2")
+    kpi(kc[7], "Utilidad total",              f"${kpis['margen_dinero']/1e6:.1f}M",    OM_GREEN)
     st.markdown("<br>", unsafe_allow_html=True)
 
     # Time series
@@ -1291,10 +1334,15 @@ with tab2:
     ts = agg["ts"]
     tc1,tc2 = st.columns(2)
     with tc1:
-        fig = px.area(ts, x="mes_str", y="venta", title="Venta mensual total ($)",
+        fig = px.area(ts, x="mes_str", y="venta", title="Ventas mensuales totales ($)",
                       labels={"mes_str":"Mes","venta":"Ventas ($)"}, color_discrete_sequence=[OM_RED])
         fig.update_xaxes(tickangle=45)
         st.plotly_chart(_layout(fig), use_container_width=True)
+        # Insight: find best and worst month
+        if len(ts) > 1:
+            _best_m = ts.loc[ts["venta"].idxmax(), "mes_str"]
+            _worst_m = ts.loc[ts["venta"].idxmin(), "mes_str"]
+            st.markdown(f'<div class="insight-box">💡 Tu mejor mes fue <strong>{_best_m}</strong> — planea subidas de precio antes del pico de demanda.</div>', unsafe_allow_html=True)
     with tc2:
         fig = px.bar(ts, x="mes_str", y="unidades", title="Unidades vendidas por mes",
                      labels={"mes_str":"Mes","unidades":"Unidades"}, color_discrete_sequence=[OM_BLUE])
@@ -1437,7 +1485,7 @@ with tab2:
 with tab3:
     results = st.session_state["results"]
     if results is None:
-        st.info("⏳ Primero ejecuta el análisis en **🧮 Calculadora**.")
+        st.info("⬅️ Sube tus datos y presiona **🔍 Analizar mi catálogo** en el panel izquierdo para ver la inteligencia de precios.")
         st.stop()
 
     df_m1a = results["m1a"]; df_m1b = results["m1b"]; df_m1c = results["m1c"]
@@ -1476,20 +1524,120 @@ with tab3:
     _precio_pct = f"{float(_ml_kpi['feat_df'][_ml_kpi['feat_df']['feature'].isin(_precio_feats)]['importancia'].sum())*100:.0f}%" if _ml_kpi else "—"
 
     pk = st.columns(6)
-    kpi(pk[0], "SKUs con recomendación",  f"{n_validos} ({pct_valid:.0f}%)",   OM_RED)
-    kpi(pk[1], "Subir precio",            f"{n_subir} SKUs",                    OM_BLUE)
-    kpi(pk[2], "Promover / Bajar",        f"{n_promover} SKUs",                 OM_GREEN)
-    kpi(pk[3], "Mantener precio",         f"{n_mantener} SKUs",                 OM_AMBER)
-    kpi(pk[4], "Impacto anualizado est.", f"+${_imp_total_anual:,.0f}",         OM_RED)
-    kpi(pk[5], "Precio explica demanda",  _precio_pct,                          OM_BLUE)
+    kpi(pk[0], "Productos con recomendación", f"{n_validos} ({pct_valid:.0f}%)", OM_RED)
+    kpi(pk[1], "✅ Sube el precio",            f"{n_subir} productos",            OM_BLUE)
+    kpi(pk[2], "📢 Lanza una promoción",       f"{n_promover} productos",         OM_GREEN)
+    kpi(pk[3], "➡️ Mantén el precio",          f"{n_mantener} productos",         OM_AMBER)
+    kpi(pk[4], "Impacto anualizado estimado",  f"+${_imp_total_anual:,.0f}",      OM_RED)
+    kpi(pk[5], "El precio explica la demanda", _precio_pct,                       OM_BLUE)
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── Paso 1: Pipeline ML — fundamento del modelo ───────────────────────────
+    # ── Resumen ejecutivo con IA — AL INICIO para ejecutivos ─────────────────
     ml_res = st.session_state.get("ml_results")
+    section("🤖 Resumen ejecutivo con Inteligencia Artificial")
+    st.caption("Claude genera un reporte integrado con los hallazgos clave, acciones inmediatas e impacto financiero. "
+               "Ideal para presentar a dirección.")
+
+    _api_key2 = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not _api_key2:
+        st.warning("Configura ANTHROPIC_API_KEY en Railway para habilitar el reporte ejecutivo con IA.")
+    else:
+        _bc2, _ic2 = st.columns([1, 3])
+        with _bc2:
+            _gen_ai2 = st.button("🤖 Generar reporte ejecutivo", type="primary", key="claude_top")
+        with _ic2:
+            st.caption("~10 segundos · integra análisis de precios + impacto financiero + timing")
+
+        if _gen_ai2:
+            with st.spinner("Generando reporte ejecutivo… esto tarda unos 10 segundos"):
+                try:
+                    import anthropic as _anth2
+                    _cli2 = _anth2.Anthropic(api_key=_api_key2)
+                    _ns2  = len(df_m1a[df_m1a["recomendacion"]=="Subir precio"])
+                    _np2  = len(df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"])
+                    _nm2  = len(df_m1a[df_m1a["recomendacion"]=="Mantener precio"])
+                    _nn2  = len(df_m1a[df_m1a["recomendacion"]=="No recomendable"])
+                    _vdf2 = df_m1a[df_m1a["recomendacion"]!="No recomendable"]
+                    _r2v2 = float(_vdf2["r2"].mean()) if len(_vdf2)>0 else 0
+                    _bmd2 = float(df_m1a["beta"].median())
+                    _psg2 = float((df_m1a["pval"]<0.10).mean()*100)
+                    _mlr2 = st.session_state["ml_results"]["r2_r"] if st.session_state.get("ml_results") else 0
+                    _mlg2 = st.session_state["ml_results"]["ganador"] if st.session_state.get("ml_results") else "ML"
+
+                    def _ct2(rec2, esc2, n2=6):
+                        pool2 = df_m1a[df_m1a["recomendacion"]==rec2].nsmallest(n2,"pval")
+                        rows2 = []
+                        for _, r2 in pool2.iterrows():
+                            sr2 = df_sim[(df_sim["prod_nm"]==r2["prod_nm"])&(df_sim["cambio"]==esc2)]
+                            d2 = f" | delta={sr2.iloc[0]['delta_ingreso_pct']:+.1f}%" if len(sr2)>0 else ""
+                            rows2.append(f"  * {r2['prod_nm'][:38]} | b={r2['beta']:.2f}{d2}")
+                        return "\n".join(rows2) or "  (ninguno)"
+
+                    _dep2 = ""
+                    if "dept_nm" in df_m1a.columns:
+                        for dn2, grp2 in df_m1a.groupby("dept_nm"):
+                            vc2 = grp2["recomendacion"].value_counts()
+                            _dep2 += f"  {str(dn2)[:22]}: " + " ".join(f"{r3}={c3}" for r3,c3 in vc2.items()) + "\n"
+
+                    _cal2 = ""
+                    if len(df_cal)>0:
+                        ms2 = df_cal[df_cal["accion"]=="SUBIR"]["mes_nombre"].value_counts().head(3).index.tolist()
+                        mp2 = df_cal[df_cal["accion"]=="PROMOVER"]["mes_nombre"].value_counts().head(3).index.tolist()
+                        _cal2 = f"SUBIR en: {', '.join(ms2) or 'N/A'} | PROMOVER en: {', '.join(mp2) or 'N/A'}"
+
+                    _fin2 = ""
+                    if len(df_sim)>0:
+                        def _tdf2(recs2, esc2b):
+                            sk2 = df_m1a[df_m1a["recomendacion"].isin(recs2)]["prod_nm"].tolist()
+                            b2  = df_sim[(df_sim["prod_nm"].isin(sk2))&(df_sim["cambio"]=="Base 0%")]["ingreso_est"].sum()
+                            t2  = df_sim[(df_sim["prod_nm"].isin(sk2))&(df_sim["cambio"]==esc2b)]["ingreso_est"].sum()
+                            return t2 - b2
+                        _ds2 = _tdf2(["Subir precio"],"+10%")
+                        _dp2 = _tdf2(["Bajar / Promover"],"-10%")
+                        _fin2 = f"Subir: ${_ds2:+,.0f}/mes | Promos: ${_dp2:+,.0f}/mes | Total: ${_ds2+_dp2:+,.0f}/mes"
+
+                    _prom2 = (
+                        "Eres consultor senior de revenue management para OfficeMax Mexico.\n"
+                        "Escribe un reporte ejecutivo integrado en espanol. Maximo 350 palabras.\n\n"
+                        f"PIPELINE:\n"
+                        f"- ML ({_mlg2}): R2={_mlr2:.3f} prediciendo ventas. Precio=driver controlable #1 (58% importancia).\n"
+                        f"- OLS por SKU: {len(df_m1a)} analizados, {len(_vdf2)} validos. Beta mediana={_bmd2:.2f}. {_psg2:.0f}% significativos.\n\n"
+                        f"DISTRIBUCION: Subir={_ns2} | Mantener={_nm2} | Promover={_np2} | Sin rec={_nn2}\n\n"
+                        f"POR DEPARTAMENTO:\n{_dep2}\n"
+                        f"TOP SUBIR PRECIO:\n{_ct2('Subir precio', '+10%')}\n\n"
+                        f"TOP PROMOVER:\n{_ct2('Bajar / Promover', '-10%')}\n\n"
+                        f"TIMING: {_cal2}\n"
+                        f"IMPACTO: {_fin2}\n\n"
+                        "SECCIONES (se especifico, no uses frases genericas):\n"
+                        "1. Hallazgo clave: que dice el ML+OLS del catalogo\n"
+                        "2. Acciones inmediatas: productos especificos, betas, impacto\n"
+                        "3. Timing: cuando ejecutar segun estacionalidad\n"
+                        "4. Proyeccion de impacto financiero\n"
+                        "5. Proximos pasos: como escalar al catalogo completo"
+                    )
+
+                    _resp2 = _cli2.messages.create(
+                        model="claude-haiku-4-5-20251001", max_tokens=1000,
+                        messages=[{"role":"user","content":_prom2}])
+                    st.session_state["ai_analysis"] = _resp2.content[0].text
+                except Exception as _e2:
+                    st.error(f"Error al generar el reporte: {_e2}")
+
+        if st.session_state.get("ai_analysis"):
+            st.markdown(
+                '<div class="narrative-box" style="border-left-color:#7B1FA2;">'
+                '<div style="font-size:11px;color:#7B1FA2;font-weight:700;margin-bottom:8px;">'
+                'REPORTE EJECUTIVO — CLAUDE (Anthropic)</div></div>',
+                unsafe_allow_html=True)
+            st.markdown(st.session_state["ai_analysis"])
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── ¿Qué impulsa las ventas? — Pipeline ML ────────────────────────────────
     if ml_res:
-        section("🔬 Paso 1 — ¿Qué impulsa las ventas? Machine Learning")
-        st.caption("Random Forest vs Gradient Boosting para identificar los factores que más impactan la demanda. "
-                   "El objetivo: saber qué variable de negocio podemos controlar para mover las ventas.")
+        section("📊 ¿Qué impulsa tus ventas?")
+        st.caption("Comparamos dos modelos para identificar los factores que más impactan la demanda. "
+                   "El resultado clave: ¿qué variable de negocio puedes controlar para mover las ventas?")
 
         # Tabla comparativa
         ml_c1, ml_c2 = st.columns([1, 2])
@@ -1499,14 +1647,15 @@ with tab3:
             comp_rows = []
             for nm, v in comp.items():
                 comp_rows.append({"Modelo": f"{'★ ' if nm==ganador else ''}{nm}",
-                                   "R² Unidades": f"{v['r2_u']:.3f}",
-                                   "R² Ventas": f"{v['r2_r']:.3f}",
-                                   "R² Promedio": f"{v['r2_avg']:.3f}"})
+                                   "Precisión Unidades": f"{v['r2_u']*100:.1f}%",
+                                   "Precisión Ventas $": f"{v['r2_r']*100:.1f}%",
+                                   "Precisión Promedio": f"{v['r2_avg']*100:.1f}%"})
             st.dataframe(pd.DataFrame(comp_rows), hide_index=True, use_container_width=True)
-            st.caption(f"Train: {ml_res['train_range']}  |  Test: {ml_res['test_range']}")
+            st.caption(f"Entrenamiento: {ml_res['train_range']}  |  Prueba: {ml_res['test_range']}")
             st.markdown(
                 f'<div style="background:{OM_GREEN};color:white;border-radius:8px;padding:10px 14px;'
-                f'font-weight:700;font-size:13px;margin-top:8px;">✅ Modelo ganador: {ganador}</div>',
+                f'font-weight:700;font-size:13px;margin-top:8px;">'
+                f'✅ Modelo seleccionado: Precisión {ml_res["comparacion"][ganador]["r2_avg"]*100:.0f}%</div>',
                 unsafe_allow_html=True)
 
         with ml_c2:
@@ -1559,9 +1708,9 @@ with tab3:
 
         # ── Paso 1b: Timing óptimo de promociones ─────────────────────────────
         if "dept_pivot" in ml_res and ml_res["dept_pivot"] is not None:
-            section("📅 Paso 1b — ¿Cuándo actuar? Timing óptimo por departamento")
-            st.caption("Uplift promedio de ventas en meses con promoción vs sin promoción (datos históricos). "
-                       "Verde = meses donde las promociones generan más impacto.")
+            section("📅 ¿Cuándo actuar? Timing óptimo por departamento")
+            st.caption("Meses donde las promociones históricamente generaron más impacto en ventas por departamento. "
+                       "Verde = mayor oportunidad · Rojo = menor efecto de las promos.")
 
             dept_pivot = ml_res["dept_pivot"]
 
@@ -1611,8 +1760,7 @@ with tab3:
         st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Paso 2: Resumen OLS ───────────────────────────────────────────────────
-    _paso2_label = "Paso 2 — " if ml_res else ""
-    section(f"📊 {_paso2_label}¿Cuánto exactamente? OLS — Elasticidad precio por SKU")
+    section("🔍 ¿Qué productos deberías re-preciar?")
     rc = st.columns(4)
     for i,(rec,color) in enumerate(REC_COLORS.items()):
         cnt = rec_counts.get(rec,0)
@@ -1658,16 +1806,18 @@ with tab3:
     rec_emoji = {"Subir precio":"🔵","Mantener precio":"🟡",
                  "Bajar / Promover":"🟢","No recomendable":"⚪"}
     sku_options = ["— Ver resumen general de todos los productos —"] + [
-        f"{rec_emoji.get(r, '⚪')} {nm}"
-        for nm, r in zip(df_m1a["prod_nm"], df_m1a["recomendacion"])
+        f"{rec_emoji.get(r, '⚪')} {nm} (SKU: {sku})"
+        for nm, r, sku in zip(df_m1a["prod_nm"], df_m1a["recomendacion"], df_m1a["prod_nbr"])
     ]
-    sel_sku_pred = st.selectbox("Producto:", sku_options, key="pred_sku_sel")
+    sel_sku_pred = st.selectbox("Selecciona un producto para ver el análisis detallado:", sku_options, key="pred_sku_sel")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     if sel_sku_pred != "— Ver resumen general de todos los productos —":
         # ── MODO PRODUCTO ESPECÍFICO ──────────────────────────────────────────
-        real_nm = sel_sku_pred[2:].strip()
+        # strip emoji prefix and (SKU: XXXX) suffix
+        import re as _re
+        real_nm = _re.sub(r'\s*\(SKU:.*?\)\s*$', '', sel_sku_pred[2:].strip())
         sku_row = df_m1a[df_m1a["prod_nm"] == real_nm].iloc[0]
         sku_sim = df_sim[df_sim["prod_nm"] == real_nm]
         sku_cal = df_cal[df_cal["prod_nm"] == real_nm] if len(df_cal) > 0 else pd.DataFrame()
@@ -1983,24 +2133,36 @@ with tab3:
     # ── ¿La promoción funcionó? (análisis pre/durante/post) ──────────────────
     _promo_eval = ml_res.get("promo_eval") if ml_res else None
     if _promo_eval is not None and len(_promo_eval) > 0:
-        section("🏷️ ¿Las promociones funcionaron?")
-        st.caption("Análisis pre/durante/post por evento de promoción detectada (caída de precio ≥20%). "
-                   "Compara 2 meses antes, durante la promo y 2 meses después.")
+        section("🏷️ ¿Tus promociones realmente funcionaron?")
+        st.caption("Comparamos las ventas 2 meses antes, durante y 2 meses después de cada promoción detectada. "
+                   "Así sabemos si la promo generó ventas reales o solo adelantó compras.")
 
         n_rent  = (_promo_eval["rentable"]=="✅ Sí").sum()
         n_sost  = (_promo_eval["retencion"]=="✅ Sostuvo").sum()
         n_cayo  = (_promo_eval["retencion"]=="❌ Cayó post-promo").sum()
+        n_ev    = len(_promo_eval)
+
+        # Resumen en lenguaje de negocio antes de la tabla
+        _pct_rent = n_rent/n_ev*100 if n_ev else 0
+        _pct_cayo = n_cayo/n_ev*100 if n_ev else 0
+        st.markdown(
+            f'<div class="insight-box">'
+            f'<strong>Resumen:</strong> De las {n_ev} promociones analizadas, '
+            f'<strong>{n_rent} ({_pct_rent:.0f}%) generaron más ingresos</strong> durante la promo. '
+            f'Sin embargo, en <strong>{n_cayo} ({_pct_cayo:.0f}%) la demanda cayó después</strong> — '
+            f'señal de que esos clientes solo compraron por el descuento, no se fidelizaron.'
+            f'</div>', unsafe_allow_html=True)
 
         pe1,pe2,pe3,pe4 = st.columns(4)
-        kpi(pe1,"Eventos evaluados",  f"{len(_promo_eval)}",                                  OM_BLUE)
-        kpi(pe2,"Generaron + ventas", f"{n_rent} ({n_rent/len(_promo_eval)*100:.0f}%)",       OM_GREEN)
-        kpi(pe3,"Sostuvieron demanda",f"{n_sost} ({n_sost/len(_promo_eval)*100:.0f}%)",       OM_AMBER)
-        kpi(pe4,"Cayeron post-promo", f"{n_cayo} ({n_cayo/len(_promo_eval)*100:.0f}%)",       OM_RED)
+        kpi(pe1, "Promociones analizadas",          f"{n_ev}",                                    OM_BLUE)
+        kpi(pe2, "Generaron más ingresos ✅",        f"{n_rent} ({n_rent/n_ev*100:.0f}%)" if n_ev else "—", OM_GREEN)
+        kpi(pe3, "Demanda sostuvo después",          f"{n_sost} ({n_sost/n_ev*100:.0f}%)" if n_ev else "—", OM_AMBER)
+        kpi(pe4, "Demanda cayó post-promo ❌",       f"{n_cayo} ({n_cayo/n_ev*100:.0f}%)" if n_ev else "—", OM_RED)
 
         st.markdown("<br>", unsafe_allow_html=True)
-        st.caption("**Verde** = más ventas en $ durante la promo y sostuvo después  |  "
-                   "**Amarillo** = subió durante pero volvió a normal  |  "
-                   "**Rojo** = cayó después de la promo (compraron solo por el descuento)")
+        st.caption("🟢 Verde = promo rentable y sostuvo la demanda  |  "
+                   "🟡 Amarillo = subió durante pero volvió a normal  |  "
+                   "🔴 Rojo = cayó después (el cliente solo compró por el descuento, no se fidelizó)")
 
         show_eval = _promo_eval[[
             "prod_nm","dept_nm","desc_pct",
@@ -2031,102 +2193,4 @@ with tab3:
             use_container_width=True, height=320, hide_index=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── Resumen ejecutivo con IA — sintetiza todo el analisis ────────────────
     st.markdown("<br>", unsafe_allow_html=True)
-    section("🤖 Resumen ejecutivo con IA")
-    st.caption(
-        "Claude genera un reporte integrado: pipeline ML, elasticidades OLS, "
-        "impacto financiero y timing optimo. Presiona despues de revisar todo lo anterior.")
-
-    _api_key2 = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not _api_key2:
-        st.warning("Configura ANTHROPIC_API_KEY en Railway para habilitar esta funcion.")
-    else:
-        _bc2, _ic2 = st.columns([1, 3])
-        with _bc2:
-            _gen_ai2 = st.button("🤖 Generar resumen ejecutivo", type="primary", key="claude_bottom")
-        with _ic2:
-            st.caption("~10 segundos · integra ML + OLS + impacto + timing")
-
-        if _gen_ai2:
-            with st.spinner("Claude sintetizando el analisis completo..."):
-                try:
-                    import anthropic as _anth2
-                    _cli2 = _anth2.Anthropic(api_key=_api_key2)
-                    _ns2  = len(df_m1a[df_m1a["recomendacion"]=="Subir precio"])
-                    _np2  = len(df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"])
-                    _nm2  = len(df_m1a[df_m1a["recomendacion"]=="Mantener precio"])
-                    _nn2  = len(df_m1a[df_m1a["recomendacion"]=="No recomendable"])
-                    _vdf2 = df_m1a[df_m1a["recomendacion"]!="No recomendable"]
-                    _r2v2 = float(_vdf2["r2"].mean()) if len(_vdf2)>0 else 0
-                    _bmd2 = float(df_m1a["beta"].median())
-                    _psg2 = float((df_m1a["pval"]<0.10).mean()*100)
-                    _mlr2 = st.session_state["ml_results"]["r2_r"] if st.session_state.get("ml_results") else 0
-                    _mlg2 = st.session_state["ml_results"]["ganador"] if st.session_state.get("ml_results") else "ML"
-
-                    def _ct2(rec2, esc2, n2=6):
-                        pool2 = df_m1a[df_m1a["recomendacion"]==rec2].nsmallest(n2,"pval")
-                        rows2 = []
-                        for _, r2 in pool2.iterrows():
-                            sr2 = df_sim[(df_sim["prod_nm"]==r2["prod_nm"])&(df_sim["cambio"]==esc2)]
-                            d2 = f" | delta={sr2.iloc[0]['delta_ingreso_pct']:+.1f}%" if len(sr2)>0 else ""
-                            rows2.append(f"  * {r2['prod_nm'][:38]} | b={r2['beta']:.2f}{d2}")
-                        return "\n".join(rows2) or "  (ninguno)"
-
-                    _dep2 = ""
-                    if "dept_nm" in df_m1a.columns:
-                        for dn2, grp2 in df_m1a.groupby("dept_nm"):
-                            vc2 = grp2["recomendacion"].value_counts()
-                            _dep2 += f"  {str(dn2)[:22]}: " + " ".join(f"{r3}={c3}" for r3,c3 in vc2.items()) + "\n"
-
-                    _cal2 = ""
-                    if len(df_cal)>0:
-                        ms2 = df_cal[df_cal["accion"]=="SUBIR"]["mes_nombre"].value_counts().head(3).index.tolist()
-                        mp2 = df_cal[df_cal["accion"]=="PROMOVER"]["mes_nombre"].value_counts().head(3).index.tolist()
-                        _cal2 = f"SUBIR en: {', '.join(ms2) or 'N/A'} | PROMOVER en: {', '.join(mp2) or 'N/A'}"
-
-                    _fin2 = ""
-                    if len(df_sim)>0:
-                        def _tdf2(recs2, esc2b):
-                            sk2 = df_m1a[df_m1a["recomendacion"].isin(recs2)]["prod_nm"].tolist()
-                            b2  = df_sim[(df_sim["prod_nm"].isin(sk2))&(df_sim["cambio"]=="Base 0%")]["ingreso_est"].sum()
-                            t2  = df_sim[(df_sim["prod_nm"].isin(sk2))&(df_sim["cambio"]==esc2b)]["ingreso_est"].sum()
-                            return t2 - b2
-                        _ds2 = _tdf2(["Subir precio"],"+10%")
-                        _dp2 = _tdf2(["Bajar / Promover"],"-10%")
-                        _fin2 = f"Subir: ${_ds2:+,.0f}/mes | Promos: ${_dp2:+,.0f}/mes | Total: ${_ds2+_dp2:+,.0f}/mes"
-
-                    _prom2 = (
-                        "Eres consultor senior de revenue management para OfficeMax Mexico.\n"
-                        "Escribe un reporte ejecutivo integrado en espanol. Maximo 350 palabras.\n\n"
-                        f"PIPELINE:\n"
-                        f"- ML ({_mlg2}): R2={_mlr2:.3f} prediciendo ventas. Precio=driver controlable #1 (58% importancia).\n"
-                        f"- OLS por SKU: {len(df_m1a)} analizados, {len(_vdf2)} validos. Beta mediana={_bmd2:.2f}. {_psg2:.0f}% significativos.\n\n"
-                        f"DISTRIBUCION: Subir={_ns2} | Mantener={_nm2} | Promover={_np2} | Sin rec={_nn2}\n\n"
-                        f"POR DEPARTAMENTO:\n{_dep2}\n"
-                        f"TOP SUBIR PRECIO:\n{_ct2('Subir precio', '+10%')}\n\n"
-                        f"TOP PROMOVER:\n{_ct2('Bajar / Promover', '-10%')}\n\n"
-                        f"TIMING: {_cal2}\n"
-                        f"IMPACTO: {_fin2}\n\n"
-                        "SECCIONES (se especifico, no uses frases genericas):\n"
-                        "1. Hallazgo clave: que dice el ML+OLS del catalogo\n"
-                        "2. Acciones inmediatas: productos especificos, betas, impacto\n"
-                        "3. Timing: cuando ejecutar segun estacionalidad\n"
-                        "4. Proyeccion de impacto financiero\n"
-                        "5. Proximos pasos: como escalar al catalogo completo"
-                    )
-
-                    _resp2 = _cli2.messages.create(
-                        model="claude-haiku-4-5-20251001", max_tokens=1000,
-                        messages=[{"role":"user","content":_prom2}])
-                    st.session_state["ai_analysis"] = _resp2.content[0].text
-                except Exception as _e2:
-                    st.error(f"Error al llamar a Claude: {_e2}")
-
-        if st.session_state.get("ai_analysis"):
-            st.markdown(
-                '<div class="narrative-box" style="border-left-color:#7B1FA2;">' +
-                '<div style="font-size:11px;color:#7B1FA2;font-weight:700;margin-bottom:8px;">' +
-                'REPORTE EJECUTIVO — CLAUDE (Anthropic)</div></div>',
-                unsafe_allow_html=True)
-            st.markdown(st.session_state["ai_analysis"])

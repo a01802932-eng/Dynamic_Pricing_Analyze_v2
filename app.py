@@ -563,7 +563,7 @@ def _fmt_bar(fig, values, prefix="$", suffix="", decimals=0):
 with st.sidebar:
     # ── Logo ────────────────────────────────────────────────────────────────
     try:
-        st.image("assets/logo-officemax-ball.png", width=160)
+        st.image("assets/logo-officemax-ball.png", width=220)
     except Exception:
         st.markdown("""
         <div class="sidebar-logo-wrap">

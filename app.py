@@ -1294,7 +1294,7 @@ with tab1:
                        f"Productos estadísticamente confiables: {pct_sig:.0f}%")
 
     st.markdown("<br>", unsafe_allow_html=True)
-    section(f"📦 Plan de acción — {n_valid} productos con recomendación de {len(df_m1a):,} analizados")
+    section(f"Plan de acción — {n_valid} productos de {len(df_m1a):,} analizados")
     st.caption("Filtra por departamento o recomendación para encontrar los productos que te interesan.")
 
     if len(df_m1a) == 0:
@@ -1369,7 +1369,7 @@ with tab1:
         st.markdown("<br>", unsafe_allow_html=True)
         _ml_scatter = st.session_state.get("ml_results")
         if _ml_scatter and _ml_scatter.get("actual_r"):
-            section("🎯 ¿Qué tan preciso es el modelo de predicción?")
+            section("Precisión del modelo de predicción")
             st.caption("El modelo aprendió con datos históricos y se probó con ventas que nunca había visto. "
                        "Cada punto es un mes de ventas de un producto — entre más cerca de la línea diagonal, mejor predice.")
             actual = _ml_scatter["actual_r"]
@@ -1379,7 +1379,7 @@ with tab1:
             n_test  = _ml_scatter["n_test"]
             model_label = "Modelo de predicción de ventas"
         else:
-            section("🎯 ¿Qué tan preciso es el modelo de predicción?")
+            section("Precisión del modelo de predicción")
             st.caption("Comparación entre ventas reales y ventas estimadas por el modelo.")
             actual = m2.get("actual_sample", [])
             fitted = m2.get("fitted_sample", [])
@@ -1630,7 +1630,7 @@ def generate_sku_narrative(sku_row, sku_sim, sku_cal):
 # ══════════════════════════════════════════════════════════════════════════════
 with tab2:
     # Filtros globales al inicio
-    section("🔍 Filtros")
+    section("Filtros")
     ff1, ff2, ff3, ff4 = st.columns(4)
     raw_df = df_main
     with ff1:
@@ -1661,7 +1661,7 @@ with tab2:
     kpis = agg["kpis"]
 
     # KPIs — 2 rows of 4 (Fix 3)
-    section("📊 Indicadores clave del negocio")
+    section("Indicadores clave del negocio")
     kc1r = st.columns(4)
     kpi(kc1r[0], "Ventas totales",             f"${kpis['venta']/1e6:.1f}M",        OM_RED)
     kpi(kc1r[1], "Unidades vendidas",          f"{kpis['unidades']/1e3:.0f}K",       OM_BLUE)
@@ -1675,7 +1675,7 @@ with tab2:
     st.markdown("<br>", unsafe_allow_html=True)
 
     # Time series
-    section("📅 Evolución mensual de ventas")
+    section("Evolución mensual de ventas")
     ts = agg["ts"]
     tc1,tc2 = st.columns(2)
     with tc1:
@@ -1695,7 +1695,7 @@ with tab2:
         st.plotly_chart(_layout(fig), use_container_width=True)
 
     # Department — Fix 6: dual-axis bars + margin line
-    section("🏷️ Ventas y margen por departamento")
+    section("Ventas y margen por departamento")
     dept = agg["dept"]
     fig_dept = go.Figure()
     dept_sorted = dept.sort_values("venta", ascending=True)
@@ -1734,7 +1734,7 @@ with tab2:
     st.plotly_chart(fig_dept, use_container_width=True)
 
     # Store performance — Fix 7: geographic map
-    section("🗺️ Distribución geográfica de tiendas")
+    section("Distribución geográfica de tiendas")
     st.caption("Tamaño = margen · Color = ventas totales")
     stores = agg["stores"]
     import re as _re_map, unicodedata as _ud
@@ -1881,7 +1881,7 @@ with tab2:
         }).head(20), hide_index=True, use_container_width=True)
 
     # Top SKUs
-    section("🏆 Top productos")
+    section("Top productos")
     top_sku = agg["top_sku"]
     if _prod_filter:
         top_sku = top_sku[top_sku["label"].str.contains(_prod_filter, case=False, na=False)]
@@ -1905,7 +1905,7 @@ with tab2:
         st.plotly_chart(_layout(fig,h=440), use_container_width=True)
 
     # Fix 4 — Weighted margin over time (replaces Premium section)
-    section("📈 Evolución del margen promedio ponderado")
+    section("Evolución del margen")
     st.caption("Margen bruto mensual como % de las ventas totales")
     margen_ts = agg["margen_ts"]
     if len(margen_ts) > 1:
@@ -1948,7 +1948,7 @@ with tab2:
     # Fix 5 — Marca: stat cards + grouped bar
     marca = agg["marca"]
     if len(marca) > 0:
-        section("🏷️ Marca Propia vs Marca Externa")
+        section("Marca propia vs marca externa")
         marca_colors = [OM_RED, "#555555", OM_AMBER, OM_BLUE]
         # Stat cards
         mc_cols = st.columns(len(marca))
@@ -1981,7 +1981,7 @@ with tab2:
         st.plotly_chart(fig_mb, use_container_width=True)
 
     # Fix 8b — Seasonality: filled area chart + treemap
-    section("📆 Estacionalidad — promedio por mes del año")
+    section("Estacionalidad por mes")
     seas = agg["seas"]
     se1, se2 = st.columns(2)
     with se1:
@@ -2050,7 +2050,7 @@ with tab3:
     rec_counts = df_m1a["recomendacion"].value_counts()
 
     # ── KPIs del dashboard predictivo ────────────────────────────────────────
-    section("📊 Indicadores clave del análisis")
+    section("Indicadores clave")
     n_validos  = int(rec_counts.get("Subir precio",0) + rec_counts.get("Mantener precio",0) + rec_counts.get("Bajar / Promover",0))
     n_subir    = int(rec_counts.get("Subir precio",0))
     n_promover = int(rec_counts.get("Bajar / Promover",0))
@@ -2423,7 +2423,7 @@ with tab3:
 
         # ── Simulación de precios ─────────────────────────────────────────────
         if len(sku_sim) > 0 and rec != "No recomendable":
-            section("📊 Predicción — ¿cuánto gano si cambio el precio?")
+            section("Predicción de precio por producto")
             left, right = st.columns([1, 2])
 
             base = sku_sim[sku_sim["cambio"] == "Base 0%"]
@@ -2462,7 +2462,7 @@ with tab3:
 
         # ── Calendario mensual ────────────────────────────────────────────────
         if len(sku_cal) > 0 and rec != "No recomendable":
-            section("📅 ¿En qué meses actuar? — basado en historial de demanda")
+            section("Calendario de acciones")
             st.caption("La barra muestra la demanda relativa de cada mes. "
                        "Meses con demanda alta (>1) son mejores para subir precio si el producto es inelástico, "
                        "o para promover si es elástico.")
@@ -2483,7 +2483,7 @@ with tab3:
             st.plotly_chart(_layout(fig, h=320), use_container_width=True)
 
         # st.stop() removed — simulador y claude siguen visibles
-    section("💹 Simulador de precios — ¿cuánto gano si cambio el precio?")
+    section("Simulador de precios")
     st.caption("Selecciona un producto y ve exactamente cuánto cambian los ingresos y el margen.")
 
     # Filtro por departamento para el simulador
@@ -2703,7 +2703,7 @@ with tab3:
     # ── Email form ────────────────────────────────────────────────────────────
     if st.session_state.get("show_email_form") and st.session_state.get("pdf_bytes_to_send"):
         st.markdown("---")
-        st.subheader("📧 Enviar reporte por correo")
+        st.subheader("Enviar reporte por correo")
         _recip_input = st.text_area(
             "Destinatarios (uno por línea o separados por coma)",
             placeholder="gerente@officemax.com\ndirector@officemax.com",

@@ -2233,21 +2233,6 @@ with tab3:
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── Paso 2: Resumen OLS ───────────────────────────────────────────────────
-    section("🔍 ¿Qué productos deberías re-preciar?")
-    rc = st.columns(4)
-    for i,(rec,color) in enumerate(REC_COLORS.items()):
-        cnt = rec_counts.get(rec,0)
-        pct = cnt/len(df_m1a)*100 if len(df_m1a)>0 else 0
-        rc[i].markdown(
-            f'<div class="rec-card" style="border-left:5px solid {color};padding:14px;">'
-            f'<div style="font-size:30px;font-weight:900;color:{color};">{cnt}</div>'
-            f'<div style="font-size:11px;font-weight:700;color:#333;">{rec.upper()}</div>'
-            f'<div style="font-size:10px;color:#999;">{pct:.1f}% del total</div></div>',
-            unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
     # Fix 1/9 — SKU scatter wrapped in try/except; safe prod_nm fallback
     if len(df_sim) > 0:
         try:

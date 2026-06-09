@@ -2087,179 +2087,6 @@ with tab3:
 
     # ── Resumen ejecutivo con IA — AL INICIO para ejecutivos ─────────────────
     ml_res = st.session_state.get("ml_results")
-    section("🤖 Resumen ejecutivo con Inteligencia Artificial")
-    st.caption("Claude genera un reporte integrado con los hallazgos clave, acciones inmediatas e impacto financiero. "
-               "Ideal para presentar a dirección.")
-
-    _api_key2 = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not _api_key2:
-        st.warning("Configura ANTHROPIC_API_KEY en Railway para habilitar el reporte ejecutivo con IA.")
-    else:
-        _bc2, _ic2 = st.columns([1, 3])
-        with _bc2:
-            _gen_ai2 = st.button("🤖 Generar reporte ejecutivo", type="primary", key="claude_top")
-        with _ic2:
-            st.caption("~10 segundos · integra análisis de precios + impacto financiero + timing")
-
-        if _gen_ai2:
-            with st.spinner("Generando reporte ejecutivo… esto tarda unos 10 segundos"):
-                try:
-                    import anthropic as _anth2
-                    _cli2 = _anth2.Anthropic(api_key=_api_key2)
-                    _ns2  = len(df_m1a[df_m1a["recomendacion"]=="Subir precio"])
-                    _np2  = len(df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"])
-                    _nm2  = len(df_m1a[df_m1a["recomendacion"]=="Mantener precio"])
-                    _nn2  = len(df_m1a[df_m1a["recomendacion"]=="No recomendable"])
-                    _vdf2 = df_m1a[df_m1a["recomendacion"]!="No recomendable"]
-                    _r2v2 = float(_vdf2["r2"].mean()) if len(_vdf2)>0 else 0
-                    _bmd2 = float(df_m1a["beta"].median())
-                    _psg2 = float((df_m1a["pval"]<0.10).mean()*100)
-                    _mlr2 = st.session_state["ml_results"]["r2_r"] if st.session_state.get("ml_results") else 0
-                    _mlg2 = st.session_state["ml_results"]["ganador"] if st.session_state.get("ml_results") else "ML"
-
-                    def _ct2(rec2, esc2, n2=6):
-                        pool2 = df_m1a[df_m1a["recomendacion"]==rec2].nsmallest(n2,"pval")
-                        rows2 = []
-                        for _, r2 in pool2.iterrows():
-                            sr2 = df_sim[(df_sim["prod_nm"]==r2["prod_nm"])&(df_sim["cambio"]==esc2)]
-                            d2 = f" | delta={sr2.iloc[0]['delta_ingreso_pct']:+.1f}%" if len(sr2)>0 else ""
-                            rows2.append(f"  * {r2['prod_nm'][:38]} | b={r2['beta']:.2f}{d2}")
-                        return "\n".join(rows2) or "  (ninguno)"
-
-                    _dep2 = ""
-                    if "dept_nm" in df_m1a.columns:
-                        for dn2, grp2 in df_m1a.groupby("dept_nm"):
-                            vc2 = grp2["recomendacion"].value_counts()
-                            _dep2 += f"  {str(dn2)[:22]}: " + " ".join(f"{r3}={c3}" for r3,c3 in vc2.items()) + "\n"
-
-                    _cal2 = ""
-                    if len(df_cal)>0:
-                        ms2 = df_cal[df_cal["accion"]=="SUBIR"]["mes_nombre"].value_counts().head(3).index.tolist()
-                        mp2 = df_cal[df_cal["accion"]=="PROMOVER"]["mes_nombre"].value_counts().head(3).index.tolist()
-                        _cal2 = f"SUBIR en: {', '.join(ms2) or 'N/A'} | PROMOVER en: {', '.join(mp2) or 'N/A'}"
-
-                    _fin2 = ""
-                    if len(df_sim)>0:
-                        def _tdf2(recs2, esc2b):
-                            sk2 = df_m1a[df_m1a["recomendacion"].isin(recs2)]["prod_nm"].tolist()
-                            b2  = df_sim[(df_sim["prod_nm"].isin(sk2))&(df_sim["cambio"]=="Base 0%")]["ingreso_est"].sum()
-                            t2  = df_sim[(df_sim["prod_nm"].isin(sk2))&(df_sim["cambio"]==esc2b)]["ingreso_est"].sum()
-                            return t2 - b2
-                        _ds2 = _tdf2(["Subir precio"],"+10%")
-                        _dp2 = _tdf2(["Bajar / Promover"],"-10%")
-                        _fin2 = f"Subir: ${_ds2:+,.0f}/mes | Promos: ${_dp2:+,.0f}/mes | Total: ${_ds2+_dp2:+,.0f}/mes"
-
-                    _prom2 = (
-                        "Eres consultor senior de revenue management para OfficeMax Mexico.\n"
-                        "Escribe un reporte ejecutivo integrado en espanol. Maximo 350 palabras.\n\n"
-                        f"PIPELINE:\n"
-                        f"- ML ({_mlg2}): R2={_mlr2:.3f} prediciendo ventas. Precio=driver controlable #1 (58% importancia).\n"
-                        f"- OLS por SKU: {len(df_m1a)} analizados, {len(_vdf2)} validos. Beta mediana={_bmd2:.2f}. {_psg2:.0f}% significativos.\n\n"
-                        f"DISTRIBUCION: Subir={_ns2} | Mantener={_nm2} | Promover={_np2} | Sin rec={_nn2}\n\n"
-                        f"POR DEPARTAMENTO:\n{_dep2}\n"
-                        f"TOP SUBIR PRECIO:\n{_ct2('Subir precio', '+10%')}\n\n"
-                        f"TOP PROMOVER:\n{_ct2('Bajar / Promover', '-10%')}\n\n"
-                        f"TIMING: {_cal2}\n"
-                        f"IMPACTO: {_fin2}\n\n"
-                        "SECCIONES (se especifico, no uses frases genericas):\n"
-                        "1. Hallazgo clave: que dice el ML+OLS del catalogo\n"
-                        "2. Acciones inmediatas: productos especificos, betas, impacto\n"
-                        "3. Timing: cuando ejecutar segun estacionalidad\n"
-                        "4. Proyeccion de impacto financiero\n"
-                        "5. Proximos pasos: como escalar al catalogo completo"
-                    )
-
-                    _resp2 = _cli2.messages.create(
-                        model="claude-haiku-4-5-20251001", max_tokens=1000,
-                        messages=[{"role":"user","content":_prom2}])
-                    st.session_state["ai_analysis"] = _resp2.content[0].text
-                except Exception as _e2:
-                    st.error(f"Error al generar el reporte: {_e2}")
-
-        if st.session_state.get("ai_analysis"):
-            st.markdown(
-                '<div class="narrative-box" style="border-left-color:#7B1FA2;">'
-                '<div style="font-size:11px;color:#7B1FA2;font-weight:700;margin-bottom:8px;">'
-                'REPORTE EJECUTIVO — CLAUDE (Anthropic)</div></div>',
-                unsafe_allow_html=True)
-            st.markdown(st.session_state["ai_analysis"])
-
-    # ── PDF download + email buttons ──────────────────────────────────────────
-    from datetime import datetime as _dt_pdf
-    if st.session_state.get("results") and st.session_state.get("ml_results"):
-        try:
-            _pdf_bytes = generate_pdf_report(
-                st.session_state["results"],
-                st.session_state["ml_results"],
-                st.session_state.get("ai_analysis", ""),
-                st.session_state["df_main"])
-            _col_dl, _col_mail, _ = st.columns([1, 1, 2])
-            with _col_dl:
-                st.download_button(
-                    label="📄 Descargar reporte PDF",
-                    data=_pdf_bytes,
-                    file_name=f"reporte_pricing_officemax_{_dt_pdf.now().strftime('%Y%m%d')}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True)
-            with _col_mail:
-                if st.button("📧 Enviar por correo", use_container_width=True, key="open_email_form"):
-                    st.session_state["pdf_bytes_to_send"] = _pdf_bytes
-                    st.session_state["show_email_form"]   = True
-        except Exception as _epdf:
-            st.warning(f"⚠️ No se pudo generar el PDF: {str(_epdf)}")
-
-    # ── Email form ────────────────────────────────────────────────────────────
-    if st.session_state.get("show_email_form") and st.session_state.get("pdf_bytes_to_send"):
-        st.markdown("---")
-        st.subheader("📧 Enviar reporte por correo")
-        _recip_input = st.text_area(
-            "Destinatarios (uno por línea o separados por coma)",
-            placeholder="gerente@officemax.com\ndirector@officemax.com",
-            height=100, key="recipients_input")
-        _subj = st.text_input(
-            "Asunto",
-            value=f"Reporte de Optimización de Precios — {_dt_pdf.now().strftime('%B %Y')}",
-            key="email_subject_input")
-        _body = st.text_area(
-            "Mensaje (el PDF irá adjunto)",
-            value=("Estimado/a,\n\n"
-                   "Adjunto encontrará el reporte ejecutivo de optimización de precios "
-                   "generado por el Dynamic Pricing Analyzer de OfficeMax México.\n\n"
-                   "El reporte incluye:\n"
-                   "• Resumen ejecutivo con hallazgos clave\n"
-                   "• Indicadores principales del análisis\n"
-                   "• Top 20 recomendaciones de precio por producto\n\n"
-                   "Saludos,\nEquipo de Pricing OfficeMax México"),
-            height=180, key="email_body_input")
-        _cs, _cc = st.columns(2)
-        with _cs:
-            if st.button("📤 Enviar ahora", type="primary", use_container_width=True, key="send_email_btn"):
-                _from  = st.session_state.get("email_from", "")
-                _pword = st.session_state.get("email_pass", "")
-                if not _from or not _pword:
-                    st.error("⚠️ Configura tu correo y contraseña en el panel izquierdo (📧 Configuración de correo)")
-                elif not _recip_input.strip():
-                    st.error("⚠️ Ingresa al menos un destinatario")
-                else:
-                    _recips = [r.strip() for r in _recip_input.replace(",","\n").splitlines() if r.strip()]
-                    with st.spinner("Enviando reporte..."):
-                        _ok, _msg = send_report_email(
-                            st.session_state["pdf_bytes_to_send"],
-                            _recips, _subj, _body, _from, _pword)
-                    if _ok:
-                        st.success(_msg)
-                        st.session_state["show_email_form"]   = False
-                        st.session_state["pdf_bytes_to_send"] = None
-                    else:
-                        st.error(_msg)
-        with _cc:
-            if st.button("Cancelar", use_container_width=True, key="cancel_email_btn"):
-                st.session_state["show_email_form"]   = False
-                st.session_state["pdf_bytes_to_send"] = None
-                st.rerun()
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
     # ── ¿Qué impulsa las ventas? — Pipeline ML ────────────────────────────────
     if ml_res:
         section("📊 ¿Qué impulsa tus ventas?")
@@ -2938,3 +2765,178 @@ with tab3:
                                    xaxis_title="Cambio en precio (%)",yaxis_title="Cambio en resultado (%)",
                                    legend=dict(orientation="h",y=1.1))
                 st.plotly_chart(fig2, use_container_width=True)
+
+
+    # ── Resumen ejecutivo con IA — al fondo ──
+    section("🤖 Resumen ejecutivo con Inteligencia Artificial")
+    st.caption("Claude genera un reporte integrado con los hallazgos clave, acciones inmediatas e impacto financiero. "
+               "Ideal para presentar a dirección.")
+
+    _api_key2 = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not _api_key2:
+        st.warning("Configura ANTHROPIC_API_KEY en Railway para habilitar el reporte ejecutivo con IA.")
+    else:
+        _bc2, _ic2 = st.columns([1, 3])
+        with _bc2:
+            _gen_ai2 = st.button("🤖 Generar reporte ejecutivo", type="primary", key="claude_top")
+        with _ic2:
+            st.caption("~10 segundos · integra análisis de precios + impacto financiero + timing")
+
+        if _gen_ai2:
+            with st.spinner("Generando reporte ejecutivo… esto tarda unos 10 segundos"):
+                try:
+                    import anthropic as _anth2
+                    _cli2 = _anth2.Anthropic(api_key=_api_key2)
+                    _ns2  = len(df_m1a[df_m1a["recomendacion"]=="Subir precio"])
+                    _np2  = len(df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"])
+                    _nm2  = len(df_m1a[df_m1a["recomendacion"]=="Mantener precio"])
+                    _nn2  = len(df_m1a[df_m1a["recomendacion"]=="No recomendable"])
+                    _vdf2 = df_m1a[df_m1a["recomendacion"]!="No recomendable"]
+                    _r2v2 = float(_vdf2["r2"].mean()) if len(_vdf2)>0 else 0
+                    _bmd2 = float(df_m1a["beta"].median())
+                    _psg2 = float((df_m1a["pval"]<0.10).mean()*100)
+                    _mlr2 = st.session_state["ml_results"]["r2_r"] if st.session_state.get("ml_results") else 0
+                    _mlg2 = st.session_state["ml_results"]["ganador"] if st.session_state.get("ml_results") else "ML"
+
+                    def _ct2(rec2, esc2, n2=6):
+                        pool2 = df_m1a[df_m1a["recomendacion"]==rec2].nsmallest(n2,"pval")
+                        rows2 = []
+                        for _, r2 in pool2.iterrows():
+                            sr2 = df_sim[(df_sim["prod_nm"]==r2["prod_nm"])&(df_sim["cambio"]==esc2)]
+                            d2 = f" | delta={sr2.iloc[0]['delta_ingreso_pct']:+.1f}%" if len(sr2)>0 else ""
+                            rows2.append(f"  * {r2['prod_nm'][:38]} | b={r2['beta']:.2f}{d2}")
+                        return "\n".join(rows2) or "  (ninguno)"
+
+                    _dep2 = ""
+                    if "dept_nm" in df_m1a.columns:
+                        for dn2, grp2 in df_m1a.groupby("dept_nm"):
+                            vc2 = grp2["recomendacion"].value_counts()
+                            _dep2 += f"  {str(dn2)[:22]}: " + " ".join(f"{r3}={c3}" for r3,c3 in vc2.items()) + "\n"
+
+                    _cal2 = ""
+                    if len(df_cal)>0:
+                        ms2 = df_cal[df_cal["accion"]=="SUBIR"]["mes_nombre"].value_counts().head(3).index.tolist()
+                        mp2 = df_cal[df_cal["accion"]=="PROMOVER"]["mes_nombre"].value_counts().head(3).index.tolist()
+                        _cal2 = f"SUBIR en: {', '.join(ms2) or 'N/A'} | PROMOVER en: {', '.join(mp2) or 'N/A'}"
+
+                    _fin2 = ""
+                    if len(df_sim)>0:
+                        def _tdf2(recs2, esc2b):
+                            sk2 = df_m1a[df_m1a["recomendacion"].isin(recs2)]["prod_nm"].tolist()
+                            b2  = df_sim[(df_sim["prod_nm"].isin(sk2))&(df_sim["cambio"]=="Base 0%")]["ingreso_est"].sum()
+                            t2  = df_sim[(df_sim["prod_nm"].isin(sk2))&(df_sim["cambio"]==esc2b)]["ingreso_est"].sum()
+                            return t2 - b2
+                        _ds2 = _tdf2(["Subir precio"],"+10%")
+                        _dp2 = _tdf2(["Bajar / Promover"],"-10%")
+                        _fin2 = f"Subir: ${_ds2:+,.0f}/mes | Promos: ${_dp2:+,.0f}/mes | Total: ${_ds2+_dp2:+,.0f}/mes"
+
+                    _prom2 = (
+                        "Eres consultor senior de revenue management para OfficeMax Mexico.\n"
+                        "Escribe un reporte ejecutivo integrado en espanol. Maximo 350 palabras.\n\n"
+                        f"PIPELINE:\n"
+                        f"- ML ({_mlg2}): R2={_mlr2:.3f} prediciendo ventas. Precio=driver controlable #1 (58% importancia).\n"
+                        f"- OLS por SKU: {len(df_m1a)} analizados, {len(_vdf2)} validos. Beta mediana={_bmd2:.2f}. {_psg2:.0f}% significativos.\n\n"
+                        f"DISTRIBUCION: Subir={_ns2} | Mantener={_nm2} | Promover={_np2} | Sin rec={_nn2}\n\n"
+                        f"POR DEPARTAMENTO:\n{_dep2}\n"
+                        f"TOP SUBIR PRECIO:\n{_ct2('Subir precio', '+10%')}\n\n"
+                        f"TOP PROMOVER:\n{_ct2('Bajar / Promover', '-10%')}\n\n"
+                        f"TIMING: {_cal2}\n"
+                        f"IMPACTO: {_fin2}\n\n"
+                        "SECCIONES (se especifico, no uses frases genericas):\n"
+                        "1. Hallazgo clave: que dice el ML+OLS del catalogo\n"
+                        "2. Acciones inmediatas: productos especificos, betas, impacto\n"
+                        "3. Timing: cuando ejecutar segun estacionalidad\n"
+                        "4. Proyeccion de impacto financiero\n"
+                        "5. Proximos pasos: como escalar al catalogo completo"
+                    )
+
+                    _resp2 = _cli2.messages.create(
+                        model="claude-haiku-4-5-20251001", max_tokens=1000,
+                        messages=[{"role":"user","content":_prom2}])
+                    st.session_state["ai_analysis"] = _resp2.content[0].text
+                except Exception as _e2:
+                    st.error(f"Error al generar el reporte: {_e2}")
+
+        if st.session_state.get("ai_analysis"):
+            st.markdown(
+                '<div class="narrative-box" style="border-left-color:#7B1FA2;">'
+                '<div style="font-size:11px;color:#7B1FA2;font-weight:700;margin-bottom:8px;">'
+                'REPORTE EJECUTIVO — CLAUDE (Anthropic)</div></div>',
+                unsafe_allow_html=True)
+            st.markdown(st.session_state["ai_analysis"])
+
+    # ── PDF download + email buttons ──────────────────────────────────────────
+    from datetime import datetime as _dt_pdf
+    if st.session_state.get("results") and st.session_state.get("ml_results"):
+        try:
+            _pdf_bytes = generate_pdf_report(
+                st.session_state["results"],
+                st.session_state["ml_results"],
+                st.session_state.get("ai_analysis", ""),
+                st.session_state["df_main"])
+            _col_dl, _col_mail, _ = st.columns([1, 1, 2])
+            with _col_dl:
+                st.download_button(
+                    label="📄 Descargar reporte PDF",
+                    data=_pdf_bytes,
+                    file_name=f"reporte_pricing_officemax_{_dt_pdf.now().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True)
+            with _col_mail:
+                if st.button("📧 Enviar por correo", use_container_width=True, key="open_email_form"):
+                    st.session_state["pdf_bytes_to_send"] = _pdf_bytes
+                    st.session_state["show_email_form"]   = True
+        except Exception as _epdf:
+            st.warning(f"⚠️ No se pudo generar el PDF: {str(_epdf)}")
+
+    # ── Email form ────────────────────────────────────────────────────────────
+    if st.session_state.get("show_email_form") and st.session_state.get("pdf_bytes_to_send"):
+        st.markdown("---")
+        st.subheader("📧 Enviar reporte por correo")
+        _recip_input = st.text_area(
+            "Destinatarios (uno por línea o separados por coma)",
+            placeholder="gerente@officemax.com\ndirector@officemax.com",
+            height=100, key="recipients_input")
+        _subj = st.text_input(
+            "Asunto",
+            value=f"Reporte de Optimización de Precios — {_dt_pdf.now().strftime('%B %Y')}",
+            key="email_subject_input")
+        _body = st.text_area(
+            "Mensaje (el PDF irá adjunto)",
+            value=("Estimado/a,\n\n"
+                   "Adjunto encontrará el reporte ejecutivo de optimización de precios "
+                   "generado por el Dynamic Pricing Analyzer de OfficeMax México.\n\n"
+                   "El reporte incluye:\n"
+                   "• Resumen ejecutivo con hallazgos clave\n"
+                   "• Indicadores principales del análisis\n"
+                   "• Top 20 recomendaciones de precio por producto\n\n"
+                   "Saludos,\nEquipo de Pricing OfficeMax México"),
+            height=180, key="email_body_input")
+        _cs, _cc = st.columns(2)
+        with _cs:
+            if st.button("📤 Enviar ahora", type="primary", use_container_width=True, key="send_email_btn"):
+                _from  = st.session_state.get("email_from", "")
+                _pword = st.session_state.get("email_pass", "")
+                if not _from or not _pword:
+                    st.error("⚠️ Configura tu correo y contraseña en el panel izquierdo (📧 Configuración de correo)")
+                elif not _recip_input.strip():
+                    st.error("⚠️ Ingresa al menos un destinatario")
+                else:
+                    _recips = [r.strip() for r in _recip_input.replace(",","\n").splitlines() if r.strip()]
+                    with st.spinner("Enviando reporte..."):
+                        _ok, _msg = send_report_email(
+                            st.session_state["pdf_bytes_to_send"],
+                            _recips, _subj, _body, _from, _pword)
+                    if _ok:
+                        st.success(_msg)
+                        st.session_state["show_email_form"]   = False
+                        st.session_state["pdf_bytes_to_send"] = None
+                    else:
+                        st.error(_msg)
+        with _cc:
+            if st.button("Cancelar", use_container_width=True, key="cancel_email_btn"):
+                st.session_state["show_email_form"]   = False
+                st.session_state["pdf_bytes_to_send"] = None
+                st.rerun()
+
+    st.markdown("<br>", unsafe_allow_html=True)

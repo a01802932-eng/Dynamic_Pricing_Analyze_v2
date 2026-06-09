@@ -2075,14 +2075,13 @@ with tab3:
     _precio_feats = {"Log Precio","% Descuento vs modal","Precio vs Catálogo","Cambio precio % (mes ant.)"}
     _precio_pct = f"{float(_ml_kpi['feat_df'][_ml_kpi['feat_df']['feature'].isin(_precio_feats)]['importancia'].sum())*100:.0f}%" if _ml_kpi else "—"
 
-    # 2 rows of 3 (Fix 3)
     pk1 = st.columns(3)
-    kpi(pk1[0], "Productos con recomendación", f"{n_validos} ({pct_valid:.0f}%)", OM_RED)
-    kpi(pk1[1], "✅ Sube el precio",            f"{n_subir} productos",            OM_BLUE)
-    kpi(pk1[2], "📢 Lanza una promoción",       f"{n_promover} productos",         OM_GREEN)
+    kpi(pk1[0], "Productos con recomendación", f"{n_validos} ({pct_valid:.0f}%)",                                              OM_RED)
+    kpi(pk1[1], "✅ Sube el precio",            f"{n_subir} prod · +${_imp_sub:,.0f}/mes",                                     OM_BLUE)
+    kpi(pk1[2], "📢 Lanza una promoción",       f"{n_promover} prod · +${_imp_prm:,.0f}/mes",                                  OM_GREEN)
     pk2 = st.columns(2)
-    kpi(pk2[0], "➡️ Mantén el precio",         f"{n_mantener} productos",         OM_AMBER)
-    kpi(pk2[1], "Impacto anualizado estimado", f"+${_imp_total_anual:,.0f}",      OM_RED)
+    kpi(pk2[0], "➡️ Mantén el precio",         f"{n_mantener} productos",                                                     OM_AMBER)
+    kpi(pk2[1], "Impacto anualizado estimado", f"+${_imp_total_anual:,.0f}",                                                  OM_RED)
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Resumen ejecutivo con IA — AL INICIO para ejecutivos ─────────────────
@@ -2317,53 +2316,6 @@ with tab3:
     st.plotly_chart(_layout(fig, h=260), use_container_width=True)
 
 
-    # Fix 10 — Impact KPIs moved here (right after Paso 2 / OLS section)
-    if len(df_sim) > 0:
-        _sub_pool = df_m1a[df_m1a["recomendacion"]=="Subir precio"]["prod_nm"].tolist()
-        _prm_pool = df_m1a[df_m1a["recomendacion"]=="Bajar / Promover"]["prod_nm"].tolist()
-
-        def _delta_rev(nms, esc):
-            base = df_sim[(df_sim["prod_nm"].isin(nms)) & (df_sim["cambio"]=="Base 0%")]["ingreso_est"].sum()
-            best = df_sim[(df_sim["prod_nm"].isin(nms)) & (df_sim["cambio"]==esc)]["ingreso_est"].sum()
-            return best - base
-
-        def _delta_uds(nms, esc):
-            base = df_sim[(df_sim["prod_nm"].isin(nms)) & (df_sim["cambio"]=="Base 0%")]["unidades_est"].sum()
-            best = df_sim[(df_sim["prod_nm"].isin(nms)) & (df_sim["cambio"]==esc)]["unidades_est"].sum()
-            return best - base
-
-        _ing_sub = _delta_rev(_sub_pool, "+10%")
-        _ing_prm = _delta_rev(_prm_pool, "-10%")
-        _uds_prm = _delta_uds(_prm_pool, "-10%")
-        _total   = _ing_sub + _ing_prm
-
-        section("💰 Impacto potencial de negocio — si implementas las recomendaciones")
-        st.caption("Estimación del modelo con los datos actuales. Con más historial, la precisión aumenta.")
-        def _kpi_impact(col, label, value_str, color):
-            parts = value_str.split("/")
-            main_val = parts[0]
-            suffix   = "/" + parts[1] if len(parts) > 1 else ""
-            col.markdown(
-                f'<div style="background:white;border-radius:12px;border-top:4px solid {color};'
-                f'padding:20px 16px;text-align:center;min-height:130px;display:flex;'
-                f'flex-direction:column;justify-content:center;'
-                f'box-shadow:0 2px 8px rgba(0,0,0,0.08);margin-bottom:8px;">'
-                f'<div style="font-size:1.9rem;font-weight:800;color:#1A1A1A;line-height:1.1;">'
-                f'{main_val}</div>'
-                f'<div style="font-size:1rem;font-weight:500;color:#555;margin-bottom:4px;">'
-                f'{suffix}</div>'
-                f'<div style="font-size:0.7rem;font-weight:600;color:#666;text-transform:uppercase;'
-                f'letter-spacing:0.05em;margin-top:6px;">{label}</div>'
-                f'</div>', unsafe_allow_html=True)
-
-        _ic1, _ic2, _ic3, _ic4 = st.columns(4)
-        _kpi_impact(_ic1, f"Subir precio — {len(_sub_pool)} prod. (+10%)",
-                    f"+${_ing_sub:,.0f}/mes", OM_BLUE)
-        _kpi_impact(_ic2, f"Promover — {len(_prm_pool)} prod. (-10%)",
-                    f"+${_ing_prm:,.0f}/mes" if _ing_prm >= 0 else f"${_ing_prm:,.0f}/mes", OM_GREEN)
-        _kpi_impact(_ic3, "Unidades extra por promos", f"+{_uds_prm:,.0f}/mes", OM_AMBER)
-        _kpi_impact(_ic4, "Impacto total anualizado",  f"+${_total*12:,.0f}/año", OM_RED)
-        st.markdown("<br>", unsafe_allow_html=True)
 
 
     # ── ¿La promoción funcionó? (análisis pre/durante/post) ──────────────────

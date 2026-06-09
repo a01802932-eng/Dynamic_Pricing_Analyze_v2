@@ -2564,6 +2564,79 @@ with tab3:
         _kpi_impact(_ic4, "Impacto total anualizado",  f"+${_total*12:,.0f}/año", OM_RED)
         st.markdown("<br>", unsafe_allow_html=True)
 
+
+    # ── ¿La promoción funcionó? (análisis pre/durante/post) ──────────────────
+    _promo_eval = ml_res.get("promo_eval") if ml_res else None
+    if _promo_eval is not None and len(_promo_eval) > 0:
+        section("🏷️ ¿Tus promociones realmente funcionaron?")
+        st.caption("Comparamos las ventas 2 meses antes, durante y 2 meses después de cada promoción detectada. "
+                   "Así sabemos si la promo generó ventas reales o solo adelantó compras.")
+
+        n_rent  = (_promo_eval["rentable"]=="✅ Sí").sum()
+        n_sost  = (_promo_eval["retencion"]=="✅ Sostuvo").sum()
+        n_cayo  = (_promo_eval["retencion"]=="❌ Cayó post-promo").sum()
+        n_ev    = len(_promo_eval)
+
+        # Resumen en lenguaje de negocio antes de la tabla
+        _pct_rent = n_rent/n_ev*100 if n_ev else 0
+        _pct_cayo = n_cayo/n_ev*100 if n_ev else 0
+        st.markdown(
+            f'<div class="insight-box">'
+            f'<strong>Resumen:</strong> De las {n_ev} promociones analizadas, '
+            f'<strong>{n_rent} ({_pct_rent:.0f}%) generaron más ingresos</strong> durante la promo. '
+            f'Sin embargo, en <strong>{n_cayo} ({_pct_cayo:.0f}%) la demanda cayó después</strong> — '
+            f'señal de que esos clientes solo compraron por el descuento, no se fidelizaron.'
+            f'</div>', unsafe_allow_html=True)
+
+        pe1,pe2,pe3,pe4 = st.columns(4)
+        kpi(pe1, "Promociones analizadas",          f"{n_ev}",                                    OM_BLUE)
+        kpi(pe2, "Generaron más ingresos ✅",        f"{n_rent} ({n_rent/n_ev*100:.0f}%)" if n_ev else "—", OM_GREEN)
+        kpi(pe3, "Demanda sostuvo después",          f"{n_sost} ({n_sost/n_ev*100:.0f}%)" if n_ev else "—", OM_AMBER)
+        kpi(pe4, "Demanda cayó post-promo ❌",       f"{n_cayo} ({n_cayo/n_ev*100:.0f}%)" if n_ev else "—", OM_RED)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.caption("🟢 Verde = promo rentable y sostuvo la demanda  |  "
+                   "🟡 Amarillo = subió durante pero volvió a normal  |  "
+                   "🔴 Rojo = cayó después (el cliente solo compró por el descuento, no se fidelizó)")
+
+        # Fix 13 — clean number formatting for display copy only
+        show_eval = _promo_eval[[
+            "prod_nm","dept_nm","desc_pct",
+            "uds_pre","uds_dur","uds_post",
+            "up_dur","up_post","rv_up",
+            "rentable","retencion"
+        ]].copy()
+        # Round unit columns to int, pct to 1 decimal
+        for _uc in ["uds_pre","uds_dur","uds_post"]:
+            show_eval[_uc] = pd.to_numeric(show_eval[_uc], errors="coerce").round(0).astype("Int64")
+        for _pc in ["up_dur","up_post","rv_up","desc_pct"]:
+            show_eval[_pc] = pd.to_numeric(show_eval[_pc], errors="coerce").round(1)
+        show_eval.columns = [
+            "Producto","Departamento","Descuento %",
+            "Uds ANTES","Uds DURANTE","Uds DESPUÉS",
+            "Uplift uds %","Post-promo %","Uplift ventas %",
+            "¿Rentable?","¿Sostuvo demanda?"
+        ]
+
+        def _color_promo(row):
+            if row["¿Rentable?"]=="✅ Sí" and row["¿Sostuvo demanda?"]=="✅ Sostuvo":
+                c = "#E8F5E9"
+            elif row["¿Sostuvo demanda?"]=="❌ Cayó post-promo":
+                c = "#FFEBEE"
+            else:
+                c = "#FFF9C4"
+            return [f"background-color:{c}"]*len(row)
+
+        fmt = {"Descuento %":"{:.1f}%","Uplift uds %":"{:+.1f}%",
+               "Uplift ventas %":"{:+.1f}%","Post-promo %":"{:+.1f}%"}
+        st.dataframe(
+            show_eval.style.apply(_color_promo, axis=1).format(fmt, na_rep="—"),
+            use_container_width=True, height=320, hide_index=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+
     # ── Selector: general o por producto ─────────────────────────────────────
     section("🔍 Análisis por producto")
     st.caption("Selecciona un producto para ver exactamente qué hacer con su precio y en qué meses. "
@@ -2865,74 +2938,3 @@ with tab3:
                                    xaxis_title="Cambio en precio (%)",yaxis_title="Cambio en resultado (%)",
                                    legend=dict(orientation="h",y=1.1))
                 st.plotly_chart(fig2, use_container_width=True)
-
-    # ── ¿La promoción funcionó? (análisis pre/durante/post) ──────────────────
-    _promo_eval = ml_res.get("promo_eval") if ml_res else None
-    if _promo_eval is not None and len(_promo_eval) > 0:
-        section("🏷️ ¿Tus promociones realmente funcionaron?")
-        st.caption("Comparamos las ventas 2 meses antes, durante y 2 meses después de cada promoción detectada. "
-                   "Así sabemos si la promo generó ventas reales o solo adelantó compras.")
-
-        n_rent  = (_promo_eval["rentable"]=="✅ Sí").sum()
-        n_sost  = (_promo_eval["retencion"]=="✅ Sostuvo").sum()
-        n_cayo  = (_promo_eval["retencion"]=="❌ Cayó post-promo").sum()
-        n_ev    = len(_promo_eval)
-
-        # Resumen en lenguaje de negocio antes de la tabla
-        _pct_rent = n_rent/n_ev*100 if n_ev else 0
-        _pct_cayo = n_cayo/n_ev*100 if n_ev else 0
-        st.markdown(
-            f'<div class="insight-box">'
-            f'<strong>Resumen:</strong> De las {n_ev} promociones analizadas, '
-            f'<strong>{n_rent} ({_pct_rent:.0f}%) generaron más ingresos</strong> durante la promo. '
-            f'Sin embargo, en <strong>{n_cayo} ({_pct_cayo:.0f}%) la demanda cayó después</strong> — '
-            f'señal de que esos clientes solo compraron por el descuento, no se fidelizaron.'
-            f'</div>', unsafe_allow_html=True)
-
-        pe1,pe2,pe3,pe4 = st.columns(4)
-        kpi(pe1, "Promociones analizadas",          f"{n_ev}",                                    OM_BLUE)
-        kpi(pe2, "Generaron más ingresos ✅",        f"{n_rent} ({n_rent/n_ev*100:.0f}%)" if n_ev else "—", OM_GREEN)
-        kpi(pe3, "Demanda sostuvo después",          f"{n_sost} ({n_sost/n_ev*100:.0f}%)" if n_ev else "—", OM_AMBER)
-        kpi(pe4, "Demanda cayó post-promo ❌",       f"{n_cayo} ({n_cayo/n_ev*100:.0f}%)" if n_ev else "—", OM_RED)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.caption("🟢 Verde = promo rentable y sostuvo la demanda  |  "
-                   "🟡 Amarillo = subió durante pero volvió a normal  |  "
-                   "🔴 Rojo = cayó después (el cliente solo compró por el descuento, no se fidelizó)")
-
-        # Fix 13 — clean number formatting for display copy only
-        show_eval = _promo_eval[[
-            "prod_nm","dept_nm","desc_pct",
-            "uds_pre","uds_dur","uds_post",
-            "up_dur","up_post","rv_up",
-            "rentable","retencion"
-        ]].copy()
-        # Round unit columns to int, pct to 1 decimal
-        for _uc in ["uds_pre","uds_dur","uds_post"]:
-            show_eval[_uc] = pd.to_numeric(show_eval[_uc], errors="coerce").round(0).astype("Int64")
-        for _pc in ["up_dur","up_post","rv_up","desc_pct"]:
-            show_eval[_pc] = pd.to_numeric(show_eval[_pc], errors="coerce").round(1)
-        show_eval.columns = [
-            "Producto","Departamento","Descuento %",
-            "Uds ANTES","Uds DURANTE","Uds DESPUÉS",
-            "Uplift uds %","Post-promo %","Uplift ventas %",
-            "¿Rentable?","¿Sostuvo demanda?"
-        ]
-
-        def _color_promo(row):
-            if row["¿Rentable?"]=="✅ Sí" and row["¿Sostuvo demanda?"]=="✅ Sostuvo":
-                c = "#E8F5E9"
-            elif row["¿Sostuvo demanda?"]=="❌ Cayó post-promo":
-                c = "#FFEBEE"
-            else:
-                c = "#FFF9C4"
-            return [f"background-color:{c}"]*len(row)
-
-        fmt = {"Descuento %":"{:.1f}%","Uplift uds %":"{:+.1f}%",
-               "Uplift ventas %":"{:+.1f}%","Post-promo %":"{:+.1f}%"}
-        st.dataframe(
-            show_eval.style.apply(_color_promo, axis=1).format(fmt, na_rep="—"),
-            use_container_width=True, height=320, hide_index=True)
-        st.markdown("<br>", unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)

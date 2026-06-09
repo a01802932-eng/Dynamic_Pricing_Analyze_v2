@@ -2397,7 +2397,7 @@ with tab3:
                     zmin=0,
                     hovertemplate="<b>%{y}</b><br>%{x}: %{z:.1f}% uplift<extra></extra>",
                     showscale=True,
-                    colorbar=dict(title="Uplift %<br>vs sin promo", titlefont=dict(size=11))))
+                    colorbar=dict(title=dict(text="Uplift %", font=dict(size=11)))))
                 fig_dh.update_layout(
                     height=500, margin=dict(t=30,b=10,l=10,r=80),
                     paper_bgcolor="white", plot_bgcolor="white",

@@ -2080,10 +2080,9 @@ with tab3:
     kpi(pk1[0], "Productos con recomendación", f"{n_validos} ({pct_valid:.0f}%)", OM_RED)
     kpi(pk1[1], "✅ Sube el precio",            f"{n_subir} productos",            OM_BLUE)
     kpi(pk1[2], "📢 Lanza una promoción",       f"{n_promover} productos",         OM_GREEN)
-    pk2 = st.columns(3)
-    kpi(pk2[0], "➡️ Mantén el precio",          f"{n_mantener} productos",         OM_AMBER)
-    kpi(pk2[1], "Impacto anualizado estimado",  f"+${_imp_total_anual:,.0f}",      OM_RED)
-    kpi(pk2[2], "El precio explica la demanda", _precio_pct,                       OM_BLUE)
+    pk2 = st.columns(2)
+    kpi(pk2[0], "➡️ Mantén el precio",         f"{n_mantener} productos",         OM_AMBER)
+    kpi(pk2[1], "Impacto anualizado estimado", f"+${_imp_total_anual:,.0f}",      OM_RED)
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Resumen ejecutivo con IA — AL INICIO para ejecutivos ─────────────────

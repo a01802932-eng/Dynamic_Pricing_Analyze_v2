@@ -2178,61 +2178,6 @@ with tab3:
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # ── Paso 1b: Timing óptimo de promociones ─────────────────────────────
-        if "dept_pivot" in ml_res and ml_res["dept_pivot"] is not None:
-            section("Timing óptimo por departamento")
-            st.caption("Meses donde las promociones históricamente generaron más impacto en ventas por departamento. "
-                       "Verde = mayor oportunidad · Rojo = menor efecto de las promos.")
-
-            dept_pivot = ml_res["dept_pivot"]
-
-            # Top 3 meses por departamento → bar chart claro
-            dept_top = []
-            for dept in dept_pivot.index:
-                row = dept_pivot.loc[dept].dropna().sort_values(ascending=False)
-                for mes, uplift in row.head(3).items():
-                    dept_top.append({"Departamento": dept[:25], "Mes": mes,
-                                     "Uplift %": round(uplift, 1)})
-            dept_top_df = pd.DataFrame(dept_top)
-
-            pb1, pb2 = st.columns([3, 2])
-            with pb1:
-                if len(dept_top_df) > 0:
-                    fig_bar = px.bar(
-                        dept_top_df.sort_values("Uplift %", ascending=False).head(20),
-                        x="Uplift %", y="Departamento", color="Mes",
-                        orientation="h", barmode="group",
-                        title="Top meses de mayor uplift por departamento",
-                        color_discrete_sequence=px.colors.qualitative.Set2)
-                    fig_bar.update_layout(plot_bgcolor="white", paper_bgcolor="white",
-                                          height=380, margin=dict(t=45,b=20,l=10,r=20),
-                                          yaxis=dict(autorange="reversed"),
-                                          legend=dict(orientation="h", y=1.08))
-                    fig_bar.update_traces(
-                        hovertemplate="<b>%{y}</b><br>%{x:.1f}% uplift en %{marker.color}<extra></extra>")
-                    st.plotly_chart(fig_bar, use_container_width=True)
-
-            with pb2:
-                # Fix 12 — heatmap with high-contrast scale, bigger fonts
-                fig_dh = go.Figure(data=go.Heatmap(
-                    z=dept_pivot.values,
-                    x=list(dept_pivot.columns),
-                    y=[d[:22] for d in dept_pivot.index],
-                    colorscale="RdYlGn",
-                    zmin=0,
-                    hovertemplate="<b>%{y}</b><br>%{x}: %{z:.1f}% uplift<extra></extra>",
-                    showscale=True,
-                    colorbar=dict(title=dict(text="Uplift %", font=dict(size=11)))))
-                fig_dh.update_layout(
-                    height=500, margin=dict(t=30,b=10,l=10,r=80),
-                    paper_bgcolor="white", plot_bgcolor="white",
-                    xaxis=dict(side="top", tickfont=dict(size=12)),
-                    yaxis=dict(tickfont=dict(size=12)))
-                st.plotly_chart(fig_dh, use_container_width=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-    # Fix 1/9 — SKU scatter wrapped in try/except; safe prod_nm fallback
     if len(df_sim) > 0:
         try:
             # Safe id column: prod_nm if available, else prod_nbr
@@ -2321,6 +2266,33 @@ with tab3:
     # ── ¿La promoción funcionó? (análisis pre/durante/post) ──────────────────
     _promo_eval = ml_res.get("promo_eval") if ml_res else None
     if _promo_eval is not None and len(_promo_eval) > 0:
+        # ── Paso 1b: Timing óptimo de promociones ─────────────────────────────
+        if "dept_pivot" in ml_res and ml_res["dept_pivot"] is not None:
+            section("Timing óptimo por departamento")
+            st.caption("Meses donde las promociones históricamente generaron más impacto en ventas por departamento. "
+                       "Verde = mayor oportunidad · Rojo = menor efecto de las promos.")
+
+            dept_pivot = ml_res["dept_pivot"]
+
+            fig_dh = go.Figure(data=go.Heatmap(
+                z=dept_pivot.values,
+                x=list(dept_pivot.columns),
+                y=[d[:22] for d in dept_pivot.index],
+                colorscale="RdYlGn",
+                zmin=0,
+                hovertemplate="<b>%{y}</b><br>%{x}: %{z:.1f}% uplift<extra></extra>",
+                showscale=True,
+                colorbar=dict(title=dict(text="Uplift %", font=dict(size=11)))))
+            fig_dh.update_layout(
+                height=320, margin=dict(t=30,b=10,l=10,r=80),
+                paper_bgcolor="white", plot_bgcolor="white",
+                xaxis=dict(side="top", tickfont=dict(size=12)),
+                yaxis=dict(tickfont=dict(size=12)))
+            st.plotly_chart(fig_dh, use_container_width=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+    # Fix 1/9 — SKU scatter wrapped in try/except; safe prod_nm fallback
         section("Evaluación de promociones")
         st.caption("Comparamos las ventas 2 meses antes, durante y 2 meses después de cada promoción detectada. "
                    "Así sabemos si la promo generó ventas reales o solo adelantó compras.")

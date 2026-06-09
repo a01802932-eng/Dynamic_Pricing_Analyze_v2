@@ -2076,9 +2076,9 @@ with tab3:
     _precio_pct = f"{float(_ml_kpi['feat_df'][_ml_kpi['feat_df']['feature'].isin(_precio_feats)]['importancia'].sum())*100:.0f}%" if _ml_kpi else "—"
 
     pk1 = st.columns(3)
-    kpi(pk1[0], "Productos con recomendación", f"{n_validos} ({pct_valid:.0f}%)",                                              OM_RED)
-    kpi(pk1[1], "✅ Sube el precio",            f"{n_subir} prod · +${_imp_sub:,.0f}/mes",                                     OM_BLUE)
-    kpi(pk1[2], "📢 Lanza una promoción",       f"{n_promover} prod · +${_imp_prm:,.0f}/mes",                                  OM_GREEN)
+    kpi(pk1[0], "Productos con recomendación", f"{n_validos} ({pct_valid:.0f}%)",       OM_RED)
+    kpi(pk1[1], f"✅ Sube el precio — {n_subir} prod.", f"+${_imp_sub:,.0f}/mes",      OM_BLUE)
+    kpi(pk1[2], f"📢 Lanza promoción — {n_promover} prod.", f"+${_imp_prm:,.0f}/mes", OM_GREEN)
     pk2 = st.columns(2)
     kpi(pk2[0], "➡️ Mantén el precio",         f"{n_mantener} productos",                                                     OM_AMBER)
     kpi(pk2[1], "Impacto anualizado estimado", f"+${_imp_total_anual:,.0f}",                                                  OM_RED)

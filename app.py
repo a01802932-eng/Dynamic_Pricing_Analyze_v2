@@ -2076,19 +2076,19 @@ with tab3:
     _precio_pct = f"{float(_ml_kpi['feat_df'][_ml_kpi['feat_df']['feature'].isin(_precio_feats)]['importancia'].sum())*100:.0f}%" if _ml_kpi else "—"
 
     pk1 = st.columns(3)
-    kpi(pk1[0], "Productos con recomendación", f"{n_validos} ({pct_valid:.0f}%)",       OM_RED)
-    kpi(pk1[1], f"✅ Sube el precio — {n_subir} prod.", f"+${_imp_sub:,.0f}/mes",      OM_BLUE)
-    kpi(pk1[2], f"📢 Lanza promoción — {n_promover} prod.", f"+${_imp_prm:,.0f}/mes", OM_GREEN)
+    kpi(pk1[0], "Productos analizados", f"{n_validos} ({pct_valid:.0f}%)",       OM_RED)
+    kpi(pk1[1], f"Subir precio ({n_subir} prod)", f"+${_imp_sub:,.0f}/mes",      OM_BLUE)
+    kpi(pk1[2], f"Promociones ({n_promover} prod)", f"+${_imp_prm:,.0f}/mes", OM_GREEN)
     pk2 = st.columns(2)
-    kpi(pk2[0], "➡️ Mantén el precio",         f"{n_mantener} productos",                                                     OM_AMBER)
-    kpi(pk2[1], "Impacto anualizado estimado", f"+${_imp_total_anual:,.0f}",                                                  OM_RED)
+    kpi(pk2[0], "Mantener precio",         f"{n_mantener} productos",                                                     OM_AMBER)
+    kpi(pk2[1], "Impacto anualizado", f"+${_imp_total_anual:,.0f}",                                                  OM_RED)
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Resumen ejecutivo con IA — AL INICIO para ejecutivos ─────────────────
     ml_res = st.session_state.get("ml_results")
     # ── ¿Qué impulsa las ventas? — Pipeline ML ────────────────────────────────
     if ml_res:
-        section("📊 ¿Qué impulsa tus ventas?")
+        section("Qué impulsa tus ventas")
         st.caption("Comparamos dos modelos para identificar los factores que más impactan la demanda. "
                    "El resultado clave: ¿qué variable de negocio puedes controlar para mover las ventas?")
 
@@ -2180,7 +2180,7 @@ with tab3:
 
         # ── Paso 1b: Timing óptimo de promociones ─────────────────────────────
         if "dept_pivot" in ml_res and ml_res["dept_pivot"] is not None:
-            section("📅 ¿Cuándo actuar? Timing óptimo por departamento")
+            section("Timing óptimo por departamento")
             st.caption("Meses donde las promociones históricamente generaron más impacto en ventas por departamento. "
                        "Verde = mayor oportunidad · Rojo = menor efecto de las promos.")
 
@@ -2259,7 +2259,7 @@ with tab3:
                 "Bajar / Promover": "#2196F3",
                 "No recomendable":  OM_LGRAY,
             }
-            section("🎯 Priorización de productos: sensibilidad al precio vs impacto financiero")
+            section("Priorización de productos")
             st.caption("Los productos en la esquina inferior izquierda son muy sensibles al precio y de alto impacto — prioriza sus promociones.")
             fig_scat = go.Figure()
             for rec_s, grp_s in _scat_df.groupby("recomendacion"):
@@ -2321,7 +2321,7 @@ with tab3:
     # ── ¿La promoción funcionó? (análisis pre/durante/post) ──────────────────
     _promo_eval = ml_res.get("promo_eval") if ml_res else None
     if _promo_eval is not None and len(_promo_eval) > 0:
-        section("🏷️ ¿Tus promociones realmente funcionaron?")
+        section("Evaluación de promociones")
         st.caption("Comparamos las ventas 2 meses antes, durante y 2 meses después de cada promoción detectada. "
                    "Así sabemos si la promo generó ventas reales o solo adelantó compras.")
 
@@ -2391,7 +2391,7 @@ with tab3:
 
 
     # ── Selector: general o por producto ─────────────────────────────────────
-    section("🔍 Análisis por producto")
+    section("Análisis por producto")
     st.caption("Selecciona un producto para ver exactamente qué hacer con su precio y en qué meses. "
                "Puedes buscar cualquier producto — incluyendo los sin recomendación, que te dirán por qué.")
 
@@ -2607,7 +2607,7 @@ with tab3:
 
 
     # ── Resumen ejecutivo con IA — al fondo ──
-    section("🤖 Resumen ejecutivo con Inteligencia Artificial")
+    section("Resumen ejecutivo")
     st.caption("Claude genera un reporte integrado con los hallazgos clave, acciones inmediatas e impacto financiero. "
                "Ideal para presentar a dirección.")
 

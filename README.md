@@ -7,6 +7,13 @@ Construida con **Streamlit** y desplegada en **Railway**.
 
 ---
 
+## Autor
+
+**Kevin Alberto Torres Valdez**
+**Emilio Ramírez Álvarez**
+**Valeria Constanza Roman Rodriguez**
+**Alexa Escalona Zariñan**
+
 ## Demo rápida
 
 1. Sube tu CSV/Excel (o usa `plantilla_input.csv`)
@@ -231,7 +238,9 @@ jupyter notebook Elasticidad_OfficeMax.ipynb
 
 ## Autor
 
+**Kevin Alberto Torres Valdez**
 **Emilio Ramírez Álvarez**
-[GitHub](https://github.com/EmilioRam1)
+**Valeria Constanza Roman Rodriguez**
+**Alexa Escalona Zariñan**
 
 *Reto Tec — OfficeMax · 2026*

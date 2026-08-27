@@ -9,10 +9,13 @@ Construida con **Streamlit** y desplegada en **Railway**.
 
 ## Autor
 
-**Kevin Alberto Torres Valdez**
-**Emilio Ramírez Álvarez**
-**Valeria Constanza Roman Rodriguez**
-**Alexa Escalona Zariñan**
+Kevin Alberto Torres Valdez
+
+Emilio Ramírez Álvarez
+
+Valeria Constanza Roman Rodriguez
+
+Alexa Escalona Zariñan
 
 ## Demo rápida
 
